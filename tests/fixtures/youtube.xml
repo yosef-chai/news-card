@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=UC123"/>
+ <id>yt:channel:UC123</id>
+ <title>Example Channel</title>
+ <link rel="alternate" href="https://www.youtube.com/channel/UC123"/>
+ <entry>
+  <id>yt:video:abc123</id>
+  <yt:videoId>abc123</yt:videoId>
+  <title>First video</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=abc123"/>
+  <author><name>Example Channel</name></author>
+  <published>2026-09-30T10:00:00+00:00</published>
+  <updated>2026-09-30T11:00:00+00:00</updated>
+  <media:group>
+   <media:title>First video</media:title>
+   <media:content url="https://www.youtube.com/v/abc123?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i1.ytimg.com/vi/abc123/hqdefault.jpg" width="480" height="360"/>
+   <media:description>Video description text</media:description>
+  </media:group>
+ </entry>
+</feed>

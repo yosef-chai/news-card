@@ -1,0 +1,1962 @@
+<!doctype html>
+<html dir="rtl" lang="he-IL">
+<head><style>img.lazy{min-height:1px}</style><link href="https://www.jdn.co.il/wp-content/plugins/w3-total-cache/pub/js/lazyload.min.js" as="script">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="profile" href="https://gmpg.org/xfn/11">
+	<script id="ad-manager-host-runtime">
+(function(w,d){
+	var PHP_PRO=false;
+	var PHP_LOGGED=false;
+	var AJAX_URL="https:\/\/www.jdn.co.il\/wp-admin\/admin-ajax.php?action=ad_manager_host_pro_status";
+
+	function hasWpLogin(){
+		try{return d.cookie.indexOf('wordpress_logged_in')!==-1;}catch(e){return false;}
+	}
+
+	function cacheSaysPro(){
+		try{if(d.cookie.indexOf('ad_manager_pro=1')!==-1)return true;}catch(e){}
+		try{if(w.localStorage&&w.localStorage.getItem('ad_manager_pro')==='1')return true;}catch(e){}
+		return false;
+	}
+
+	function isSponsoredType(t){
+		t=(t||'').toLowerCase();
+		return t==='sponsored'||t==='article_list'||t==='article_dedicated';
+	}
+
+	function shouldLoadSlot(containerId){
+		if(!w.__amPro)return true;
+		var el=d.getElementById(containerId);
+		if(!el)return false;
+		return isSponsoredType(el.getAttribute('data-tool-type'));
+	}
+
+	function purgeStandardSlots(){
+		var slots=d.querySelectorAll('.ad-manager-slot[id^="ad-manager-"]');
+		for(var i=0;i<slots.length;i++){
+			var tt=(slots[i].getAttribute('data-tool-type')||'').toLowerCase();
+			if(!isSponsoredType(tt)){
+				slots[i].innerHTML='';
+				slots[i].removeAttribute('data-am-loaded');
+			}
+		}
+	}
+
+	function filterQueue(){
+		w._adManager=w._adManager||{q:[]};
+		if(w._adManager.q&&w._adManager.q.length){
+			w._adManager.q=w._adManager.q.filter(function(id){return shouldLoadSlot(id);});
+		}
+	}
+
+	/* החלת מצב פרו — מסתיר באנרים רגילים */
+	function applyProState(){
+		w.__amPro=true;
+		w.adManagerData=w.adManagerData||{};
+		w.adManagerData.isProSubscriber=true;
+		w.__adManagerBlockBannerFetch=false;
+		try{w.localStorage.setItem('ad_manager_pro','1');}catch(e){}
+		if(d.documentElement){d.documentElement.classList.add('ad-manager-pro-user');}
+		if(d.body){d.body.classList.add('ad-manager-pro-user');}
+		filterQueue();
+		purgeStandardSlots();
+	}
+
+	/* ביטול מצב פרו — מנקה מטמון ישן (הורדה מפרימיום / התנתקות) */
+	function clearProState(){
+		var was=w.__amPro;
+		w.__amPro=false;
+		w.adManagerData=w.adManagerData||{};
+		w.adManagerData.isProSubscriber=false;
+		try{w.localStorage.removeItem('ad_manager_pro');}catch(e){}
+		try{d.cookie='ad_manager_pro=;path=/;max-age=0';}catch(e){}
+		if(d.documentElement){d.documentElement.classList.remove('ad-manager-pro-user');}
+		if(d.body){d.body.classList.remove('ad-manager-pro-user');}
+		/* אם הסתרנו באנרים אופטימית — נטען אותם מחדש */
+		if(was&&w.AdManager&&typeof w.AdManager.scheduleBannerBootstrap==='function'){
+			w.AdManager.scheduleBannerBootstrap();
+		}
+	}
+
+	function installFetchBlock(){
+		var origFetch=w.fetch;
+		if(typeof origFetch!=='function')return;
+		w.fetch=function(input){
+			var url=typeof input==='string'?input:(input&&input.url?String(input.url):'');
+			if(w.__adManagerBlockBannerFetch&&url&&url.indexOf('/wp-json/ad-manager/v1/banner/')!==-1){
+				return Promise.resolve(new Response('{"success":true,"banners":[]}',{status:200,headers:{'Content-Type':'application/json'}}));
+			}
+			return origFetch.apply(this,arguments);
+		};
+	}
+
+	w.__amPro=false;
+	w.__adManagerIsProViewer=function(){return !!w.__amPro;};
+	w.__adManagerShouldLoadSlot=shouldLoadSlot;
+
+	if(PHP_PRO){
+		/* השרת אישר פרו — סמכותי */
+		applyProState();
+		return;
+	}
+	if(PHP_LOGGED){
+		/* השרת אומר מחובר אך לא פרו — סמכותי; מנקים מטמון ישן ומציגים באנרים */
+		clearProState();
+		return;
+	}
+	/* PHP חושב שלא מחובר — ייתכן דף ממוטמן שהוגש לגולש מחובר */
+	if(hasWpLogin()){
+		/* גולש מחובר בדף ממוטמן — חייבים אימות מהשרת (סמכותי) */
+		if(cacheSaysPro()){
+			applyProState(); /* אופטימי: מונע הבזק באנרים לפרו עד אימות */
+		}else{
+			w.__adManagerBlockBannerFetch=true;
+			installFetchBlock();
+		}
+		fetch(AJAX_URL,{credentials:'same-origin',cache:'no-store'})
+			.then(function(r){return r.json();})
+			.then(function(data){
+				w.__adManagerBlockBannerFetch=false;
+				if(data&&data.pro){applyProState();}
+				else{clearProState();}
+			})
+			.catch(function(){w.__adManagerBlockBannerFetch=false;});
+	}else{
+		/* גולש אנונימי — לא פרו; מנקים מטמון ישן אם נשאר */
+		if(cacheSaysPro()){clearProState();}
+	}
+})(window,document);
+</script>
+	<style id="ad-manager-host-pro-css">
+html.ad-manager-pro-user .ad-manager-slot:not([data-tool-type="sponsored"]):not([data-tool-type="article_list"]):not([data-tool-type="article_dedicated"]),
+body.ad-manager-pro-user .ad-manager-slot:not([data-tool-type="sponsored"]):not([data-tool-type="article_list"]):not([data-tool-type="article_dedicated"]),
+html.ad-manager-pro-user .ad-manager-incontent,
+body.ad-manager-pro-user .ad-manager-incontent {
+	display: none !important;
+	min-height: 0 !important;
+	max-height: 0 !important;
+	overflow: hidden !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+}
+</style>
+	<meta name='robots' content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' />
+<!-- Google tag (gtag.js) consent mode dataLayer added by Site Kit -->
+<script id="google_gtagjs-js-consent-mode-data-layer">
+window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}
+gtag('consent', 'default', {"ad_personalization":"denied","ad_storage":"denied","ad_user_data":"denied","analytics_storage":"denied","functionality_storage":"denied","security_storage":"denied","personalization_storage":"denied","region":["AT","BE","BG","CH","CY","CZ","DE","DK","EE","ES","FI","FR","GB","GR","HR","HU","IE","IS","IT","LI","LT","LU","LV","MT","NL","NO","PL","PT","RO","SE","SI","SK"],"wait_for_update":500});
+window._googlesitekitConsentCategoryMap = {"statistics":["analytics_storage"],"marketing":["ad_storage","ad_user_data","ad_personalization"],"functional":["functionality_storage","security_storage"],"preferences":["personalization_storage"]};
+window._googlesitekitConsents = {"ad_personalization":"denied","ad_storage":"denied","ad_user_data":"denied","analytics_storage":"denied","functionality_storage":"denied","security_storage":"denied","personalization_storage":"denied","region":["AT","BE","BG","CH","CY","CZ","DE","DK","EE","ES","FI","FR","GB","GR","HR","HU","IE","IS","IT","LI","LT","LU","LV","MT","NL","NO","PL","PT","RO","SE","SI","SK"],"wait_for_update":500};
+</script>
+<!-- End Google tag (gtag.js) consent mode dataLayer added by Site Kit -->
+
+	<!-- This site is optimized with the Yoast SEO plugin v27.6 - https://yoast.com/product/yoast-seo-wordpress/ -->
+	<title>JDN - אתר החדשות המוביל למגזר החרדי - JDN</title>
+	<link rel="canonical" href="https://www.jdn.co.il/" />
+	<meta property="og:locale" content="he_IL" />
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="JDN - אתר החדשות המוביל למגזר החרדי - JDN" />
+	<meta property="og:description" content="ה׳סטטוס׳ עברת טסט? ניגון בשופר &quot;מיתרי הלב&quot; שער עיתון שחרית תוצאות תקיפה של חיה&quot;א בלבנון החרמת רכב בכפר פלסטיני התפרצות הר געש באינדונזיה גשמים עזים בסין מפולת בוץ קטלנית בנפאל תיעוד נוסף של התפרצות הר&#8230; תקיפת מכלית איראנית במפרץ עומאן יועז הנדל מאוכזב תקיפה מדוייקת של החותים בכוחות&#8230; בלבנון אחרי תקיפת צה&quot;ל תקיפות הלילה בלבנון [&hellip;]" />
+	<meta property="og:url" content="https://www.jdn.co.il/" />
+	<meta property="og:site_name" content="JDN" />
+	<meta property="article:modified_time" content="2026-09-08T11:29:37+00:00" />
+	<meta property="og:image" content="https://www.jdn.co.il/wp-content/uploads/2026/03/logo-status.jpg" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<script type="application/ld+json" class="yoast-schema-graph">{"@context":"https:\/\/schema.org","@graph":[{"@type":"WebPage","@id":"https:\/\/www.jdn.co.il\/","url":"https:\/\/www.jdn.co.il\/","name":"JDN - אתר החדשות המוביל למגזר החרדי - JDN","isPartOf":{"@id":"https:\/\/www.jdn.co.il\/#website"},"about":{"@id":"https:\/\/www.jdn.co.il\/#organization"},"primaryImageOfPage":{"@id":"https:\/\/www.jdn.co.il\/#primaryimage"},"image":{"@id":"https:\/\/www.jdn.co.il\/#primaryimage"},"thumbnailUrl":"https:\/\/www.jdn.co.il\/wp-content\/uploads\/2026\/03\/logo-status.jpg","datePublished":"2024-08-06T10:14:59+00:00","dateModified":"2026-09-08T11:29:37+00:00","breadcrumb":{"@id":"https:\/\/www.jdn.co.il\/#breadcrumb"},"inLanguage":"he-IL","potentialAction":[{"@type":"ReadAction","target":["https:\/\/www.jdn.co.il\/"]}]},{"@type":"ImageObject","inLanguage":"he-IL","@id":"https:\/\/www.jdn.co.il\/#primaryimage","url":"https:\/\/www.jdn.co.il\/wp-content\/uploads\/2026\/03\/logo-status.jpg","contentUrl":"https:\/\/www.jdn.co.il\/wp-content\/uploads\/2026\/03\/logo-status.jpg","width":250,"height":250},{"@type":"BreadcrumbList","@id":"https:\/\/www.jdn.co.il\/#breadcrumb","itemListElement":[{"@type":"ListItem","position":1,"name":"דף הבית"}]},{"@type":"WebSite","@id":"https:\/\/www.jdn.co.il\/#website","url":"https:\/\/www.jdn.co.il\/","name":"JDN","description":"חדשות, המגזר החרדי, כלכלה, דעות – עדכונים שוטפים מהארץ ומהעולם","publisher":{"@id":"https:\/\/www.jdn.co.il\/#organization"},"potentialAction":[{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https:\/\/www.jdn.co.il\/?s={search_term_string}"},"query-input":{"@type":"PropertyValueSpecification","valueRequired":true,"valueName":"search_term_string"}}],"inLanguage":"he-IL"},{"@type":"Organization","@id":"https:\/\/www.jdn.co.il\/#organization","name":"JDN","url":"https:\/\/www.jdn.co.il\/","logo":{"@type":"ImageObject","inLanguage":"he-IL","@id":"https:\/\/www.jdn.co.il\/#\/schema\/logo\/image\/","url":"https:\/\/www.jdn.co.il\/wp-content\/uploads\/2022\/01\/logosite.png","contentUrl":"https:\/\/www.jdn.co.il\/wp-content\/uploads\/2022\/01\/logosite.png","width":300,"height":161,"caption":"JDN"},"image":{"@id":"https:\/\/www.jdn.co.il\/#\/schema\/logo\/image\/"}}]}</script>
+	<!-- / Yoast SEO plugin. -->
+
+
+<link rel='dns-prefetch' href='//www.googletagmanager.com' />
+<link rel="alternate" type="application/rss+xml" title="JDN &laquo; פיד" href="https://www.jdn.co.il/feed/" />
+<link rel="alternate" type="application/rss+xml" title="JDN &laquo; פיד תגובות" href="https://www.jdn.co.il/comments/feed/" />
+<link rel="alternate" title="oEmbed (JSON)" type="application/json+oembed" href="https://www.jdn.co.il/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.jdn.co.il%2F" />
+<link rel="alternate" title="oEmbed (XML)" type="text/xml+oembed" href="https://www.jdn.co.il/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.jdn.co.il%2F&#038;format=xml" />
+<style id="ad-manager-incontent-css">
+.ad-manager-incontent{display:block;}
+.ad-manager-incontent-right{float:right;margin:6px 0 12px 18px;}
+.ad-manager-incontent-left{float:left;margin:6px 18px 12px 0;}
+.ad-manager-incontent-none{float:none;margin:16px auto;}
+.ad-manager-incontent .ad-manager-slot{margin:0;}
+@media (max-width:600px){
+	.ad-manager-incontent-right,.ad-manager-incontent-left{float:none;margin:16px auto;}
+}
+</style>
+	<style id="wp-img-auto-sizes-contain-inline-css">
+img:is([sizes=auto i],[sizes^="auto," i]){contain-intrinsic-size:3000px 1500px}
+/*# sourceURL=wp-img-auto-sizes-contain-inline-css */
+</style>
+<style id="wp-emoji-styles-inline-css">
+
+	img.wp-smiley, img.emoji {
+		display: inline !important;
+		border: none !important;
+		box-shadow: none !important;
+		height: 1em !important;
+		width: 1em !important;
+		margin: 0 0.07em !important;
+		vertical-align: -0.1em !important;
+		background: none !important;
+		padding: 0 !important;
+	}
+/*# sourceURL=wp-emoji-styles-inline-css */
+</style>
+<style id="wp-block-styles-placeholder-inline-css">
+:root { --wp-internal-comment: "Placeholder for wp_hoist_late_printed_styles() to replace with the block styles printed at wp_footer." }
+/*# sourceURL=wp-block-styles-placeholder-inline-css */
+</style>
+<link rel='stylesheet' id='jet-engine-frontend-css' href='https://www.jdn.co.il/wp-content/plugins/jet-engine/assets/css/frontend.css?ver=3.8.10' media='all' />
+<style id="wp-global-styles-placeholder-inline-css">
+:root { --wp-internal-comment: "Placeholder for wp_hoist_late_printed_styles() to replace with the global-styles printed at wp_footer." }
+/*# sourceURL=wp-global-styles-placeholder-inline-css */
+</style>
+<link rel='stylesheet' id='jdn-aa1-style-css' href='https://www.jdn.co.il/wp-content/plugins/jdn-articles-analytics11/assets/css/style.css?ver=1.0.5' media='all' />
+<style id="jdn-aa1-style-inline-css">
+:root {--jdn-aa1-font-family: almoni;--jdn-aa1-font-size: 16px;--jdn-aa1-font-weight: 400;--jdn-aa1-text-color: #222222;--jdn-aa1-bg-color: #ffffff;--jdn-aa1-border-color: #e0e0e0;--jdn-aa1-border-width: 1px;--jdn-aa1-padding: 16px;--jdn-aa1-thumb-position: top;}
+/*# sourceURL=jdn-aa1-style-inline-css */
+</style>
+<link rel='stylesheet' id='font-awesome-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/font-awesome/css/font-awesome.min.css?ver=4.7.0' media='all' />
+<link rel='stylesheet' id='pafe-extension-style-css' href='https://www.jdn.co.il/wp-content/plugins/piotnet-addons-for-elementor-pro/assets/css/minify/extension.min.css?ver=7.1.71' media='all' />
+<style id="timeline-content-styles-inline-css">
+/* סגנונות בסיסיים */
+        .timeline-container {
+            max-width: 100%;
+            margin: 0 auto;
+            position: relative;
+        }
+        
+        .timeline-container:before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: #ddd;
+            right: 30px;
+            margin-right: -2px;
+            z-index: 0;
+        }
+        
+        .timeline-item {
+            padding: 20px 60px 20px 30px;
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        .timeline-dot {
+            width: 20px;
+            height: 20px;
+            background: #3498db;
+            border-radius: 50%;
+            position: absolute;
+            right: 20px;
+            top: 25px;
+            z-index: 1;
+            border: 3px solid #fff;
+            box-shadow: 0 0 0 4px rgba(52, 152, 219, 0.2);
+        }
+        
+        .timeline-content {
+            position: relative;
+            padding: 20px;
+            background: #fff;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            transition: all 0.3s ease;
+        }
+        
+        .timeline-content:hover {
+            box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+        }
+        
+        .timeline-date {
+            display: inline-block;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #3498db;
+        }
+        
+        /* סגנון עיצוב תמונות */
+        .timeline-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        /* אפשרות לתמונות מלאות רוחב */
+        .timeline-fullwidth-images .timeline-content img {
+            margin-left: -20px;
+            margin-right: -20px;
+            max-width: calc(100% + 40px);
+            width: calc(100% + 40px);
+            border-radius: 0;
+        }
+        
+        /* אפשרות לריפוד רק לטקסט */
+        .timeline-text-padding .timeline-content p {
+            padding: 10px 0;
+        }
+        
+        .timeline-text-padding .timeline-content > *:not(img):not(video):not(iframe):not(.wp-video):not(.video-container) {
+            padding-right: 20px;
+            padding-left: 20px;
+        }
+        
+        .timeline-text-padding .timeline-content {
+            padding: 0;
+        }
+        
+        /* תיקון עיצוב וידאו */
+        .timeline-content .wp-video,
+        .timeline-content .mejs-container {
+            width: 100% !important;
+            margin: 10px 0 !important;
+        }
+        
+        /* וידוא שכפתור ההפעלה נראה כראוי */
+        .timeline-content .mejs-overlay-play .mejs-overlay-button {
+            display: block !important;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+        
+        .timeline-content .mejs-overlay-play:hover .mejs-overlay-button {
+            opacity: 1;
+        }
+        
+        /* מיכל וידאו וכיסוי תצוגה מקדימה */
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+            margin: 15px 0;
+            background-color: #000;
+            border-radius: 5px;
+            max-width: 100%;
+        }
+        
+        .video-container iframe,
+        .video-container video,
+        .video-container .wp-video,
+        .video-container .mejs-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+        }
+        
+        .video-preview-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+        
+        .video-preview-overlay:hover {
+            background: rgba(0, 0, 0, 0.6);
+        }
+        
+        .video-play-button {
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .video-play-button:before {
+            content: '';
+            width: 0;
+            height: 0;
+            border-top: 15px solid transparent;
+            border-bottom: 15px solid transparent;
+            border-left: 25px solid #3498db;
+            margin-left: 7px;
+        }
+        
+        .video-preview-text {
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
+        }
+        
+        /* RTL התאמות */
+        .rtl .timeline-container:before {
+            right: 30px;
+            left: auto;
+        }
+        
+        .rtl .timeline-dot {
+            right: 20px;
+            left: auto;
+        }
+        
+        .rtl .timeline-item {
+            padding: 20px 60px 20px 30px;
+        }
+            /* תבנית פייסבוק */
+        .timeline-facebook .timeline-container:before {
+            background: #dddfe2;
+            width: 2px;
+        }
+        
+        .timeline-facebook .timeline-dot {
+            background: #1877f2;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 0 3px rgba(24, 119, 242, 0.15);
+        }
+        
+        .timeline-facebook .timeline-content {
+            background: #ffffff;
+            border: 1px solid #dddfe2;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            padding: 12px 16px;
+        }
+        
+        .timeline-facebook .timeline-content:hover {
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+        }
+        
+        .timeline-facebook .timeline-date {
+            color: #65676b;
+            font-size: 13px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        /* אפשרות לתמונות מלאות רוחב בפייסבוק */
+        .timeline-facebook.timeline-fullwidth-images .timeline-content img {
+            margin-left: -16px;
+            margin-right: -16px;
+            max-width: calc(100% + 32px);
+            width: calc(100% + 32px);
+            border-radius: 0;
+        }
+        
+        /* אפשרות לריפוד רק לטקסט בפייסבוק */
+        .timeline-facebook.timeline-text-padding .timeline-content > *:not(img):not(video):not(iframe):not(.wp-video):not(.video-container) {
+            padding-right: 16px;
+            padding-left: 16px;
+        }
+        
+        /* תבנית אינסטגרם */
+        .timeline-instagram .timeline-container:before {
+            background: #dbdbdb;
+            width: 1px;
+        }
+        
+        .timeline-instagram .timeline-dot {
+            background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 0 3px rgba(219, 219, 219, 0.5);
+        }
+        
+        .timeline-instagram .timeline-content {
+            background: #ffffff;
+            border: 1px solid #dbdbdb;
+            border-radius: 3px;
+            box-shadow: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+        
+        .timeline-instagram .timeline-content:hover {
+            box-shadow: 0 1px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .timeline-instagram .timeline-date {
+            color: #8e8e8e;
+            font-size: 12px;
+            font-weight: 400;
+            padding: 16px;
+            margin: 0;
+            border-bottom: 1px solid #efefef;
+            display: block;
+        }
+        
+        .timeline-instagram .timeline-content p {
+            padding: 16px;
+            margin: 0;
+        }
+        
+        /* אפשרות לתמונות מלאות רוחב באינסטגרם */
+        .timeline-instagram.timeline-fullwidth-images .timeline-content img {
+            margin: 0;
+            max-width: 100%;
+            width: 100%;
+            border-radius: 0;
+        }
+        
+        /* אפשרות לריפוד רק לטקסט באינסטגרם */
+        .timeline-instagram.timeline-text-padding .timeline-content > *:not(img):not(video):not(iframe):not(.wp-video):not(.video-container):not(.timeline-date) {
+            padding-left: 16px;
+            padding-right: 16px;
+        }
+        
+        /* תבנית טוויטר */
+        .timeline-twitter .timeline-container:before {
+            background: #cfd9de;
+            width: 2px;
+        }
+        
+        .timeline-twitter .timeline-dot {
+            background: #1d9bf0;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 0 3px rgba(29, 155, 240, 0.2);
+        }
+        
+        .timeline-twitter .timeline-content {
+            background: #ffffff;
+            border: 1px solid #e8e8e8;
+            border-radius: 16px;
+            padding: 12px 16px;
+            box-shadow: none;
+        }
+        
+        .timeline-twitter .timeline-content:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        .timeline-twitter .timeline-date {
+            color: #536471;
+            font-size: 15px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        /* אפשרות לתמונות מלאות רוחב בטוויטר */
+        .timeline-twitter.timeline-fullwidth-images .timeline-content img {
+            margin-left: -16px;
+            margin-right: -16px;
+            max-width: calc(100% + 32px);
+            width: calc(100% + 32px);
+            border-radius: 0;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        
+        /* אפשרות לריפוד רק לטקסט בטוויטר */
+        .timeline-twitter.timeline-text-padding .timeline-content > *:not(img):not(video):not(iframe):not(.wp-video):not(.video-container) {
+            padding-right: 16px;
+            padding-left: 16px;
+        }
+            /* תבנית טיקטוק */
+        .timeline-tiktok .timeline-container:before {
+            background: #fe2c55;
+            width: 2px;
+        }
+        
+        .timeline-tiktok .timeline-dot {
+            background: linear-gradient(90deg, #25f4ee 0%, #fe2c55 100%);
+            border: 2px solid #000000;
+            box-shadow: 0 0 0 3px rgba(254, 44, 85, 0.2);
+        }
+        
+        .timeline-tiktok .timeline-content {
+            background: #000000;
+            color: #ffffff;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .timeline-tiktok .timeline-content:hover {
+            box-shadow: 0 0 10px rgba(254, 44, 85, 0.3);
+        }
+        
+        .timeline-tiktok .timeline-date {
+            color: #fe2c55;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        /* אפשרות לתמונות מלאות רוחב בטיקטוק */
+        .timeline-tiktok.timeline-fullwidth-images .timeline-content img {
+            margin-left: -15px;
+            margin-right: -15px;
+            max-width: calc(100% + 30px);
+            width: calc(100% + 30px);
+            border-radius: 0;
+        }
+        
+        /* אפשרות לריפוד רק לטקסט בטיקטוק */
+        .timeline-tiktok.timeline-text-padding .timeline-content > *:not(img):not(video):not(iframe):not(.wp-video):not(.video-container) {
+            padding-right: 15px;
+            padding-left: 15px;
+        }
+        
+        /* תיקון וידאו לתבניות של רשתות חברתיות */
+        .timeline-facebook .video-container,
+        .timeline-instagram .video-container,
+        .timeline-twitter .video-container,
+        .timeline-tiktok .video-container {
+            margin: 10px -16px;
+            width: calc(100% + 32px);
+            border-radius: 0;
+        }
+        
+        .timeline-instagram .video-container {
+            margin: 0;
+            width: 100%;
+        }
+        
+        .timeline-tiktok .video-container {
+            margin: 10px -15px;
+            width: calc(100% + 30px);
+        }
+        
+        /* ניידים - התאמות */
+        @media (max-width: 767px) {
+            .timeline-container:before {
+                right: 20px;
+            }
+            
+            .timeline-dot {
+                right: 10px;
+            }
+            
+            .timeline-item {
+                padding-right: 45px;
+            }
+            
+            /* התאמות לתבניות ברספונסיב */
+            .timeline-facebook .timeline-content,
+            .timeline-instagram .timeline-content,
+            .timeline-twitter .timeline-content,
+            .timeline-tiktok .timeline-content {
+                margin-right: 15px;
+                margin-left: 5px;
+            }
+            
+            .video-play-button {
+                width: 50px;
+                height: 50px;
+            }
+            
+            .video-play-button:before {
+                border-top: 10px solid transparent;
+                border-bottom: 10px solid transparent;
+                border-left: 18px solid #3498db;
+                margin-left: 5px;
+            }
+            
+            .video-preview-text {
+                font-size: 14px;
+            }
+        }
+/*# sourceURL=timeline-content-styles-inline-css */
+</style>
+<link rel='stylesheet' id='jdn-social-css' href='https://www.jdn.co.il/wp-content/plugins/JDN-SOCIAL/public/css/style.css?ver=2.9.5.1773743504' media='all' />
+<link rel='stylesheet' id='hello-elementor-css' href='https://www.jdn.co.il/wp-content/themes/hello-elementor/assets/css/reset.css?ver=3.4.9' media='all' />
+<link rel='stylesheet' id='hello-elementor-theme-style-css' href='https://www.jdn.co.il/wp-content/themes/hello-elementor/assets/css/theme.css?ver=3.4.9' media='all' />
+<link rel='stylesheet' id='hello-elementor-header-footer-css' href='https://www.jdn.co.il/wp-content/themes/hello-elementor/assets/css/header-footer.css?ver=3.4.9' media='all' />
+<link rel='stylesheet' id='jet-popup-frontend-css' href='https://www.jdn.co.il/wp-content/plugins/jet-popup/assets/css/jet-popup-frontend.css?ver=2.2.0' media='all' />
+<link rel='stylesheet' id='elementor-frontend-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/frontend.min.css?ver=4.0.9' media='all' />
+<style id="elementor-frontend-inline-css">
+.elementor-2247806 .elementor-element.elementor-element-92b6a50 .elementor-heading-title{color:#dd3333;}
+/*# sourceURL=elementor-frontend-inline-css */
+</style>
+<link rel='stylesheet' id='widget-heading-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/widget-heading-rtl.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='widget-nav-menu-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/widget-nav-menu-rtl.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='widget-image-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/widget-image-rtl.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='e-sticky-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/modules/sticky.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='e-motion-fx-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/modules/motion-fx.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='e-popup-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/conditionals/popup.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='widget-form-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/widget-form-rtl.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='e-animation-fadeInDown-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/animations/styles/fadeInDown.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='elementor-icons-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/eicons/css/elementor-icons.min.css?ver=5.48.0' media='all' />
+<link rel='stylesheet' id='elementor-post-5-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-5.css?ver=1790258372' media='all' />
+<link rel='stylesheet' id='jet-blog-css' href='https://www.jdn.co.il/wp-content/plugins/jet-blog/assets/css/jet-blog.css?ver=2.4.8.1' media='all' />
+<link rel='stylesheet' id='jet-blog-rtl-css' href='https://www.jdn.co.il/wp-content/plugins/jet-blog/assets/css/jet-blog-rtl.css?ver=2.4.8.1' media='all' />
+<link rel='stylesheet' id='widget-divider-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/widget-divider-rtl.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='angie-story-style-css' href='https://www.jdn.co.il/wp-content/plugins/angie-story-widget/assets/css/style.css?ver=1.0.39' media='all' />
+<link rel='stylesheet' id='e-animation-fadeInUp-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/animations/styles/fadeInUp.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='swiper-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/swiper/v8/css/swiper.min.css?ver=8.4.5' media='all' />
+<link rel='stylesheet' id='e-swiper-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/conditionals/e-swiper.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='widget-slides-css' href='https://www.jdn.co.il/wp-content/plugins/elementor-pro/assets/css/widget-slides-rtl.min.css?ver=4.0.4' media='all' />
+<link rel='stylesheet' id='e-animation-shrink-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/animations/styles/e-animation-shrink.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='widget-nested-tabs-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/css/widget-nested-tabs-rtl.min.css?ver=4.0.9' media='all' />
+<link rel='stylesheet' id='elementor-post-2247806-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-2247806.css?ver=1790258206' media='all' />
+<link rel='stylesheet' id='elementor-post-494-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-494.css?ver=1790258189' media='all' />
+<link rel='stylesheet' id='elementor-post-590-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-590.css?ver=1790258189' media='all' />
+<link rel='stylesheet' id='elementor-post-2710558-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-2710558.css?ver=1790258190' media='all' />
+<link rel='stylesheet' id='elementor-post-2691323-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-2691323.css?ver=1790258190' media='all' />
+<link rel='stylesheet' id='elementor-post-2679068-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-2679068.css?ver=1790258190' media='all' />
+<link rel='stylesheet' id='elementor-post-2102157-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-2102157.css?ver=1790258190' media='all' />
+<link rel='stylesheet' id='elementor-post-1697587-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-1697587.css?ver=1790258190' media='all' />
+<link rel='stylesheet' id='elementor-post-737-css' href='https://www.jdn.co.il/wp-content/uploads/elementor/css/post-737.css?ver=1790258190' media='all' />
+<style id="elementor-pro-custom-fonts-inline-css">
+@font-face {
+	font-family: 'almoni';
+	font-style: normal;
+	font-weight: 900;
+	font-display: auto;
+	src: url('https://www.jdn.co.il/wp-content/uploads/2022/01/almoni-dl-aaa-900.woff') format('woff');
+}
+@font-face {
+	font-family: 'almoni';
+	font-style: normal;
+	font-weight: 700;
+	font-display: auto;
+	src: url('https://www.jdn.co.il/wp-content/uploads/2022/01/almoni-dl-aaa-7001.woff') format('woff');
+}
+@font-face {
+	font-family: 'almoni';
+	font-style: normal;
+	font-weight: 400;
+	font-display: auto;
+	src: url('https://www.jdn.co.il/wp-content/uploads/2022/01/almoni-dl-aaa-4003.woff') format('woff');
+}
+
+/*# sourceURL=elementor-pro-custom-fonts-inline-css */
+</style>
+<link rel='stylesheet' id='elementor-icons-shared-0-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/font-awesome/css/fontawesome.min.css?ver=5.15.3' media='all' />
+<link rel='stylesheet' id='elementor-icons-fa-solid-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/font-awesome/css/solid.min.css?ver=5.15.3' media='all' />
+<link rel='stylesheet' id='elementor-icons-fa-regular-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/font-awesome/css/regular.min.css?ver=5.15.3' media='all' />
+<link rel='stylesheet' id='elementor-icons-fa-brands-css' href='https://www.jdn.co.il/wp-content/plugins/elementor/assets/lib/font-awesome/css/brands.min.css?ver=5.15.3' media='all' />
+<script type="text/javascript">
+            window._nslDOMReady = (function () {
+                const executedCallbacks = new Set();
+            
+                return function (callback) {
+                    /**
+                    * Third parties might dispatch DOMContentLoaded events, so we need to ensure that we only run our callback once!
+                    */
+                    if (executedCallbacks.has(callback)) return;
+            
+                    const wrappedCallback = function () {
+                        if (executedCallbacks.has(callback)) return;
+                        executedCallbacks.add(callback);
+                        callback();
+                    };
+            
+                    if (document.readyState === "complete" || document.readyState === "interactive") {
+                        wrappedCallback();
+                    } else {
+                        document.addEventListener("DOMContentLoaded", wrappedCallback);
+                    }
+                };
+            })();
+        </script><script id="jquery-core-js" src="https://www.jdn.co.il/wp-includes/js/jquery/jquery.min.js?ver=3.7.1"></script>
+<script id="jquery-migrate-js" src="https://www.jdn.co.il/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.4.1"></script>
+<script id="pafe-extension-js" src="https://www.jdn.co.il/wp-content/plugins/piotnet-addons-for-elementor-pro/assets/js/minify/extension.min.js?ver=7.1.71"></script>
+<script id="jfb-data-store-actions-frontend-js" src="https://www.jdn.co.il/wp-content/plugins/jet-form-builder-data-store-actions-main/assets/js/frontend.js?ver=1.0.0"></script>
+<link rel="https://api.w.org/" href="https://www.jdn.co.il/wp-json/" /><link rel="alternate" title="JSON" type="application/json" href="https://www.jdn.co.il/wp-json/wp/v2/pages/2247806" /><link rel="EditURI" type="application/rsd+xml" title="RSD" href="https://www.jdn.co.il/xmlrpc.php?rsd" />
+<meta name="generator" content="WordPress 7.1.2" />
+<link rel='shortlink' href='https://www.jdn.co.il/' />
+
+		<!-- GA Google Analytics @ https://m0n.co/ga -->
+		<script async src="https://www.googletagmanager.com/gtag/js?id=G-YJT2MEDT6W"></script>
+		<script>
+			window.dataLayer = window.dataLayer || [];
+			function gtag(){dataLayer.push(arguments);}
+			gtag('js', new Date());
+			gtag('config', 'G-YJT2MEDT6W');
+		</script>
+
+	<meta name="generator" content="Site Kit by Google 1.179.0" /><!-- HFCM by 99 Robots - Snippet # 19: video report style -->
+<style>
+	.video_report_text{
+	  text-align: center;
+    color: red;
+    margin-top: -40px;
+		cursor: pointer;
+    font-size: smaller;
+	}
+</style>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 20: video report -->
+<script>
+	function pClickHandler(event) {
+		elementorProFrontend.modules.popup.showPopup( { id: 2102157  } );
+	}
+</script>
+
+<script>
+	document.addEventListener("DOMContentLoaded", function() {
+		var wpBlockFVPlayers = document.querySelectorAll(".flowplayer");
+
+		wpBlockFVPlayers.forEach(function(wpBlockFVPlayer, index) {
+			var newParagraph = document.createElement("p");
+			newParagraph.textContent = "דווח על וידאו זה";
+
+			newParagraph.classList.add("video_report_text");
+
+			newParagraph.addEventListener("click", pClickHandler);
+
+			wpBlockFVPlayer.parentNode.insertBefore(newParagraph, wpBlockFVPlayer.nextSibling);
+		});
+	});
+</script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 22: יישר סקרים -->
+<style>
+	.poll-quiz-main {
+    text-align: center;
+}
+	.vote_thank-you span {
+    text-align: center !important;
+}
+	.sqb_quiz_builder .quiz_outer_fe strong, .sqb_quiz_builder .quiz_outer_fe .Quiz-Template-title strong {
+    font-weight: 900;
+    font-family: 'almoni';
+}
+</style>
+
+
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 24: החלף skip לדלג -->
+ <style>
+        .fv-cva-skip {
+            visibility: hidden;
+            position: relative;
+        }
+ 
+        .fv-cva-skip:after {
+            visibility: visible;
+            position: absolute;
+            top: 0;
+            left: 0;
+            content: "דלג";
+        }
+    </style>
+
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 31: אולטרא -->
+<script src="https://ultra.clicka1.co.il/out/loader/loader.js?webId=516358231" type="module" ></script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 42: קוד ארוך הטמעה למערכת פרסום חדשה -->
+<!-- Ad Manager: קטע זה מעל מיכלי הכלים. מנוי פרו באתר המארח: התקינו host-bridge v1.1+ (מסנן הטמעה — רק מדמי תוכן) -->
+<link rel="dns-prefetch" href="https://advertising.jdn.co.il/" />
+<link rel="preconnect" href="https://advertising.jdn.co.il/" crossorigin />
+<script>
+window.adManagerData = window.adManagerData || {};
+window.adManagerData.bootstrapMode = "immediate";
+window.adManagerData.restUrl = "https:\/\/advertising.jdn.co.il";
+window._adManagerScriptLoading = true;
+</script>
+<script src="https://advertising.jdn.co.il/wp-json/ad-manager/v1/js/ad-manager.js?ver=1.1.43" id="ad-manager-js" defer onload="if(window.AdManager&amp;&amp;window.AdManager.bootstrapBannerSlots){window.AdManager.bootstrapBannerSlots();}" onerror="window._adManagerScriptLoading=false"></script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 46: מעברון דסקטופ.- מערכת חדשה -->
+<script>
+(function() {
+	try {
+		var toolId = 14;
+		var apiUrl = "https://advertising.jdn.co.il/wp-json/ad-manager/v1/banner/14?instance_id=32";
+		var toolType = "popup_desktop";
+		var toolPlatform = "desktop";
+		var autoCloseDuration = 10;
+		var limitType = "";
+		var limitCount = 0;
+		var userLimit = 0;
+		var userHourLimit = 0;
+		var popupDesktopSize = "970x600";
+		var popupFixedWidth = 970;
+		var popupFixedHeight = 600;
+		
+		function applyPopupBannerSize(bannerDiv, w, h) {
+			if (!bannerDiv || !w || !h) { return; }
+			bannerDiv.style.cssText = "margin:0;padding:0;border:0;outline:none;display:block;width:" + w + "px;height:" + h + "px;max-width:100%;max-height:100%;overflow:hidden;box-sizing:border-box;line-height:0;";
+			var imgs = bannerDiv.querySelectorAll("img");
+			for (var i = 0; i < imgs.length; i++) {
+				imgs[i].style.width = w + "px";
+				imgs[i].style.height = h + "px";
+				imgs[i].style.maxWidth = "100%";
+				imgs[i].style.maxHeight = "100%";
+				imgs[i].style.objectFit = "contain";
+				imgs[i].style.display = "block";
+			}
+			var links = bannerDiv.querySelectorAll("a.ad-banner-link");
+			for (var j = 0; j < links.length; j++) {
+				links[j].style.display = "block";
+				links[j].style.width = w + "px";
+				links[j].style.height = h + "px";
+				links[j].style.maxWidth = "100%";
+				links[j].style.lineHeight = "0";
+			}
+			var iframes = bannerDiv.querySelectorAll("iframe");
+			for (var k = 0; k < iframes.length; k++) {
+				iframes[k].style.width = w + "px";
+				iframes[k].style.height = h + "px";
+				iframes[k].style.maxWidth = "100%";
+				iframes[k].style.maxHeight = "100%";
+				iframes[k].style.display = "block";
+			}
+			var wrappers = bannerDiv.querySelectorAll("div");
+			for (var d = 0; d < wrappers.length; d++) {
+				var el = wrappers[d];
+				if (el === bannerDiv) { continue; }
+				if (el.querySelector("iframe") || el.querySelector("img")) {
+					el.style.width = w + "px";
+					el.style.height = h + "px";
+					el.style.maxWidth = "100%";
+					el.style.maxHeight = "100%";
+					el.style.overflow = "hidden";
+					el.style.boxSizing = "border-box";
+				}
+			}
+		}
+		
+		// מעקב — popup עוקף את initTracking, לכן מטמיעים כאן מעקב עצמאי (פנימי + GA4)
+		function amBuildTrackingUrl(u) {
+			try { return new URL(u).origin + "/wp-json/ad-manager/v1/track"; }
+			catch (e) { var m = (u || "").match(/^(https?:\/\/[^\/]+)/); return m ? m[1] + "/wp-json/ad-manager/v1/track" : ""; }
+		}
+		function amGaEvent(name, params) {
+			try {
+				if (typeof window.gtag === "function") { window.gtag("event", name, params); }
+				else if (window.dataLayer && typeof window.dataLayer.push === "function") { window.dataLayer.push(["event", name, params]); }
+			} catch (e) {}
+		}
+		function amAdParams(b) {
+			b = b || {};
+			// אין להשתמש בשמות שמורים ב-GA4 כגון client_id — מכווץ את מספר המשתמשים. קידומת adv_.
+			return {
+				adv_banner_id: (b.id != null) ? b.id : null,
+				adv_banner_name: b.banner_name || "",
+				adv_campaign_id: (b.campaign_id != null) ? b.campaign_id : null,
+				adv_campaign_name: b.campaign_name || "",
+				adv_client_id: (b.client_id != null) ? b.client_id : null,
+				adv_client_name: b.client_name || "",
+				adv_tool_id: toolId,
+				adv_tool_type: toolType
+			};
+		}
+		function amTrackPixel(action, bannerId, trackingUrl) {
+			try {
+				if (!trackingUrl || !bannerId) { return; }
+				var img = new Image();
+				img.src = trackingUrl + "?action=" + action + "&banner_id=" + encodeURIComponent(bannerId) + "&tool_id=" + encodeURIComponent(toolId) + "&ua=" + encodeURIComponent(navigator.userAgent || "") + "&ref=" + encodeURIComponent(document.referrer || "") + "&url=" + encodeURIComponent(window.location.href || "") + "&t=" + Date.now();
+			} catch (e) {}
+		}
+		
+		// OPTIMIZED: Simplified device detection
+		function isDeviceMatch() {
+			var ua = (navigator.userAgent || "").toLowerCase();
+			var isMobile = /android|webos|iphone|ipod|blackberry|iemobile|opera mini|mobile|phone/i.test(ua) || (window.innerWidth || 0) <= 768;
+			
+			if (toolType === "popup_mobile") return isMobile;
+			if (toolType === "popup_desktop") return !isMobile;
+			if (toolPlatform === "mobile" && !isMobile) return false;
+			if (toolPlatform === "desktop" && isMobile) return false;
+			return true;
+		}
+		
+		// CRITICAL: Check device match FIRST before any other checks
+		if (!isDeviceMatch()) {
+			return;
+		}
+
+		function isProViewer() {
+			if (typeof window.__adManagerIsProViewer === "function") { return window.__adManagerIsProViewer(); }
+			try { if (document.cookie.indexOf("ad_manager_pro=1") !== -1) { return true; } } catch (e) {}
+			try { if (window.localStorage && window.localStorage.getItem("ad_manager_pro") === "1") { return true; } } catch (e) {}
+			if (typeof adManagerData !== "undefined" && adManagerData.isProSubscriber) { return true; }
+			if (document.documentElement && document.documentElement.classList.contains("ad-manager-pro-user")) { return true; }
+			if (document.body && document.body.classList.contains("ad-manager-pro-user")) { return true; }
+			return false;
+		}
+		function appendProApiUrl(u) {
+			if (isProViewer()) {
+				var sep = u.indexOf("?") >= 0 ? "&" : "?";
+				u += sep + "pro_subscriber=1";
+			}
+			return u;
+		}
+		function isSponsoredToolType(t) {
+			t = (t || "").toLowerCase();
+			return t === "sponsored" || t === "article_list" || t === "article_dedicated";
+		}
+		if (isProViewer() && !isSponsoredToolType(toolType)) {
+			return;
+		}
+		apiUrl = appendProApiUrl(apiUrl);
+		
+		// OPTIMIZED: Simplified limits check (only runs if device matches)
+		function shouldShowPopup() {
+			var now = Date.now();
+			if (limitType && limitCount > 0) {
+				var key = "ad_popup_" + toolId + "_" + limitType;
+				var data = JSON.parse(localStorage.getItem(key) || "[]");
+				data = data.filter(function(e) { return (now - e) < (limitType === "hour" ? 3600000 : 86400000); });
+				if (data.length >= limitCount) return false;
+			}
+			if (userLimit > 0 && parseInt(localStorage.getItem("ad_popup_user_" + toolId) || "0") >= userLimit) return false;
+			if (userHourLimit > 0) {
+				var hourData = JSON.parse(localStorage.getItem("ad_popup_user_hour_" + toolId) || "[]");
+				hourData = hourData.filter(function(e) { return e > (now - 3600000); });
+				if (hourData.length >= userHourLimit) return false;
+			}
+			return true;
+		}
+		
+		// OPTIMIZED: Simplified record function
+		function recordPopupDisplay() {
+			var now = Date.now();
+			if (limitType && limitCount > 0) {
+				var key = "ad_popup_" + toolId + "_" + limitType;
+				var data = JSON.parse(localStorage.getItem(key) || "[]");
+				data.push(now);
+				localStorage.setItem(key, JSON.stringify(data));
+			}
+			if (userLimit > 0) {
+				localStorage.setItem("ad_popup_user_" + toolId, (parseInt(localStorage.getItem("ad_popup_user_" + toolId) || "0") + 1).toString());
+			}
+			if (userHourLimit > 0) {
+				var hourData = JSON.parse(localStorage.getItem("ad_popup_user_hour_" + toolId) || "[]");
+				hourData.push(now);
+				localStorage.setItem("ad_popup_user_hour_" + toolId, JSON.stringify(hourData));
+			}
+		}
+		
+		// Show popup
+		function showPopup() {
+			// CRITICAL: Check limits BEFORE fetch to prevent unnecessary server requests
+			if (!shouldShowPopup()) {
+				return; // Limits reached, do not fetch - saves server CPU
+			}
+			
+		// CRITICAL OPTIMIZATION: Add timeout and abort controller to prevent hanging requests
+		// If server is slow, abort after 4 seconds to prevent request queue buildup
+		var abortController = new AbortController();
+		var timeoutId = setTimeout(function() {
+			abortController.abort();
+		}, 4000); // 4 second timeout
+		
+		// OPTIMIZED: Fetch banner with cache control and timeout to reduce server load
+		fetch(apiUrl, {
+			method: "GET",
+			mode: "cors",
+			credentials: "same-origin",
+			cache: "default", // Allow browser caching
+			signal: abortController.signal, // Enable abort on timeout
+			headers: {
+				"Accept": "application/json"
+			}
+		})
+			.then(function(response) {
+				clearTimeout(timeoutId); // Clear timeout on success
+				if (!response.ok) return null;
+				return response.json();
+			})
+			.then(function(data) {
+				if (!data || !data.success || !data.banners || data.banners.length === 0) return;
+				
+				// OPTIMIZED: Use pre-rendered HTML from server (no client-side rendering)
+				var banner = data.banners[0];
+				if (!banner || !banner.html) return;
+				var bannerHtml = banner.html;
+				var trackingUrl = amBuildTrackingUrl(apiUrl);
+				
+				// Create popup overlay
+				var popupOverlay = document.createElement("div");
+				popupOverlay.id = "ad-popup-overlay-" + toolId;
+				popupOverlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:999999;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;";
+				
+				// Create popup content - no padding, no border, no background, just the banner
+				var popupContent = document.createElement("div");
+				var isDesktopFullScreen = (toolType === "popup_desktop" && popupDesktopSize === "fullscreen");
+				var popupW = popupFixedWidth;
+				var popupH = popupFixedHeight;
+				if (isDesktopFullScreen) {
+					popupContent.style.cssText = "position:relative;background:transparent;padding:0;margin:0;border:0;outline:none;width:100vw;height:100vh;max-width:100vw;max-height:100vh;overflow:hidden;box-shadow:none;flex:0 0 auto;";
+				} else if (popupW > 0 && popupH > 0) {
+					popupContent.style.cssText = "position:relative;background:transparent;padding:0;margin:0;border:0;outline:none;width:" + popupW + "px;height:" + popupH + "px;max-width:90vw;max-height:90vh;overflow:visible;box-shadow:none;flex:0 0 auto;";
+				} else {
+					popupContent.style.cssText = "position:relative;background:transparent;padding:0;margin:0;border:0;outline:none;max-width:90%;max-height:90%;overflow:visible;box-shadow:none;flex:0 0 auto;";
+				}
+				
+				// Close button (X) with white circle background
+				var closeBtn = document.createElement("span");
+				closeBtn.innerHTML = "&times;";
+				closeBtn.style.cssText = "position:absolute;top:-15px;right:-15px;width:30px;height:30px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:bold;color:#333;cursor:pointer;line-height:1;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,0.2);";
+				closeBtn.onclick = function() {
+					document.body.removeChild(popupOverlay);
+				};
+				
+				// OPTIMIZED: Banner content - use pre-rendered HTML
+				var bannerDiv = document.createElement("div");
+				bannerDiv.innerHTML = bannerHtml;
+				bannerDiv.style.cssText = "margin:0;padding:0;border:0;outline:none;display:block;";
+				if (isDesktopFullScreen) {
+					bannerDiv.style.cssText = "margin:0;padding:0;border:0;outline:none;display:block;width:100%;height:100%;";
+					var imgEl = bannerDiv.querySelector("img");
+					if (imgEl) {
+						imgEl.style.width = "100%";
+						imgEl.style.height = "100%";
+						imgEl.style.objectFit = "cover";
+					}
+				} else if (popupW > 0 && popupH > 0) {
+					applyPopupBannerSize(bannerDiv, popupW, popupH);
+				}
+				
+				popupContent.appendChild(closeBtn);
+				popupContent.appendChild(bannerDiv);
+				popupOverlay.appendChild(popupContent);
+				
+				// Close on overlay click
+				popupOverlay.onclick = function(e) {
+					if (e.target === popupOverlay) {
+						document.body.removeChild(popupOverlay);
+					}
+				};
+				
+				// Append to body
+				document.body.appendChild(popupOverlay);
+				
+				// Record display
+				recordPopupDisplay();
+				
+				// מעקב חשיפה — פנימי (פיקסל) + GA4
+				amTrackPixel("impression", banner.id, trackingUrl);
+				amGaEvent("advertising_impression", amAdParams(banner));
+				
+				// מעקב קליק — פנימי (פיקסל) + GA4
+				bannerDiv.addEventListener("click", function(ev) {
+					var t = ev.target;
+					var el = (t && typeof t.closest === "function") ? t.closest("[data-banner-id]") : null;
+					var bid = el ? el.getAttribute("data-banner-id") : banner.id;
+					if (!bid) { bid = banner.id; }
+					amTrackPixel("click", bid, trackingUrl);
+					amGaEvent("advertising_click", amAdParams(banner));
+				}, true);
+				
+				// Auto close after specified duration (if > 0)
+				if (autoCloseDuration > 0) {
+					setTimeout(function() {
+						if (popupOverlay.parentNode) {
+							document.body.removeChild(popupOverlay);
+						}
+					}, autoCloseDuration * 1000);
+				}
+				
+			})
+			.catch(function(error) {
+				clearTimeout(timeoutId); // Clear timeout on error
+				// Silent fail - don't log timeout errors (expected behavior)
+			});
+		}
+		
+		// OPTIMIZED: Prevent multiple popup loads
+		var popupShown = false;
+		function tryShowPopup() {
+			if (popupShown) return;
+			popupShown = true;
+			showPopup();
+		}
+		
+		// Show popup when page loads - only once
+		if (document.readyState === "complete" || document.readyState === "interactive") {
+			tryShowPopup();
+		} else {
+			document.addEventListener("DOMContentLoaded", tryShowPopup, { once: true });
+		}
+	} catch(e) {
+		// Silent fail
+	}
+})();
+</script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 48: טאבולה -->
+<script>
+(function () {
+    // ===== Fill in your values, as provided by Taboola =====
+    var PUBLISHER_ID = 'jdn-site';
+    var PAGE_TYPE    = 'article';
+    // =======================================================
+
+    var LOADER_URL         = '//cdn.taboola.com/libtrc/'       + PUBLISHER_ID + '/loader.js';
+    var LOADER_PRIVACY_URL = '//static.tblcontent.com/libtrc/' + PUBLISHER_ID + '/loader.privacy.js';
+    var SCRIPT_ID          = 'tb_loader_script';
+
+    window._taboola = window._taboola || [];
+
+    var pageTypePush = {};
+    pageTypePush[PAGE_TYPE] = 'auto';
+    _taboola.push(pageTypePush);
+
+    var firstScript = document.getElementsByTagName('script')[0];
+
+    function injectLoader(id, src, fallbackSrc) {
+        if (document.getElementById(id)) return;
+        var s = document.createElement('script');
+        s.async = true;
+        s.src   = src;
+        s.id    = id;
+        if (fallbackSrc) {
+            s.onerror = function () {
+                if (s.parentNode) s.parentNode.removeChild(s);
+                injectLoader(SCRIPT_ID + '_fb', fallbackSrc, null);
+            };
+        }
+        firstScript.parentNode.insertBefore(s, firstScript);
+    }
+
+    injectLoader(SCRIPT_ID, LOADER_URL, LOADER_PRIVACY_URL);
+
+    if (window.performance && typeof window.performance.mark === 'function') {
+        window.performance.mark('tbl_ic');
+    }
+})();
+</script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 50: טאבולה - סקריפט ראשי -->
+<script>
+(function () {
+    // ===== Fill in your values, as provided by Taboola =====
+    var PUBLISHER_ID = 'jdn-site';
+    var PAGE_TYPE    = 'article';
+    // =======================================================
+
+    var LOADER_URL         = '//cdn.taboola.com/libtrc/'       + PUBLISHER_ID + '/loader.js';
+    var LOADER_PRIVACY_URL = '//static.tblcontent.com/libtrc/' + PUBLISHER_ID + '/loader.privacy.js';
+    var SCRIPT_ID          = 'tb_loader_script';
+
+    window._taboola = window._taboola || [];
+
+    var pageTypePush = {};
+    pageTypePush[PAGE_TYPE] = 'auto';
+    _taboola.push(pageTypePush);
+
+    var firstScript = document.getElementsByTagName('script')[0];
+
+    function injectLoader(id, src, fallbackSrc) {
+        if (document.getElementById(id)) return;
+        var s = document.createElement('script');
+        s.async = true;
+        s.src   = src;
+        s.id    = id;
+        if (fallbackSrc) {
+            s.onerror = function () {
+                if (s.parentNode) s.parentNode.removeChild(s);
+                injectLoader(SCRIPT_ID + '_fb', fallbackSrc, null);
+            };
+        }
+        firstScript.parentNode.insertBefore(s, firstScript);
+    }
+
+    injectLoader(SCRIPT_ID, LOADER_URL, LOADER_PRIVACY_URL);
+
+    if (window.performance && typeof window.performance.mark === 'function') {
+        window.performance.mark('tbl_ic');
+    }
+})();
+</script>
+<!-- /end HFCM by 99 Robots -->
+<!-- HFCM by 99 Robots - Snippet # 51: באנר פוש דאון -->
+<script>
+(function() {
+	try {
+		var toolId = 17;
+		var apiUrl = "https://advertising.jdn.co.il/wp-json/ad-manager/v1/banner/17?instance_id=42";
+		var barWidth = 320;
+		var barHeight = 250;
+		var showDelayMs = 10000;
+		var limitType = "";
+		var limitCount = 0;
+		var userLimit = 0;
+		var userHourLimit = 0;
+		var storageKey = "ad_mobile_top_closed_" + toolId;
+
+		function isMobileDevice() {
+			var ua = (navigator.userAgent || "").toLowerCase();
+			return /android|webos|iphone|ipod|blackberry|iemobile|opera mini|mobile|phone/i.test(ua) || (window.innerWidth || 0) <= 768;
+		}
+		if (!isMobileDevice()) { return; }
+		try { if (sessionStorage.getItem(storageKey) === "1") { return; } } catch (e) {}
+
+		function isProViewer() {
+			try { if (document.cookie.indexOf("ad_manager_pro=1") !== -1) { return true; } } catch (e) {}
+			try { if (window.localStorage && window.localStorage.getItem("ad_manager_pro") === "1") { return true; } } catch (e) {}
+			if (typeof adManagerData !== "undefined" && adManagerData.isProSubscriber) { return true; }
+			return false;
+		}
+		if (isProViewer()) { return; }
+
+		function appendProApiUrl(u) {
+			if (isProViewer()) {
+				var sep = u.indexOf("?") >= 0 ? "&" : "?";
+				u += sep + "pro_subscriber=1";
+			}
+			return u;
+		}
+		apiUrl = appendProApiUrl(apiUrl);
+
+		function amBuildTrackingUrl(u) {
+			try { return new URL(u).origin + "/wp-json/ad-manager/v1/track"; }
+			catch (e) { var m = (u || "").match(/^(https?:\/\/[^\/]+)/); return m ? m[1] + "/wp-json/ad-manager/v1/track" : ""; }
+		}
+		function amGaEvent(name, params) {
+			try {
+				if (typeof window.gtag === "function") { window.gtag("event", name, params); }
+				else if (window.dataLayer && typeof window.dataLayer.push === "function") { window.dataLayer.push(["event", name, params]); }
+			} catch (e) {}
+		}
+		function amAdParams(b) {
+			b = b || {};
+			return {
+				adv_banner_id: (b.id != null) ? b.id : null,
+				adv_banner_name: b.banner_name || "",
+				adv_campaign_id: (b.campaign_id != null) ? b.campaign_id : null,
+				adv_campaign_name: b.campaign_name || "",
+				adv_client_id: (b.client_id != null) ? b.client_id : null,
+				adv_client_name: b.client_name || "",
+				adv_tool_id: toolId,
+				adv_tool_type: "mobile_top"
+			};
+		}
+		function amTrackPixel(action, bannerId, trackingUrl) {
+			try {
+				if (!trackingUrl || !bannerId) { return; }
+				var img = new Image();
+				img.src = trackingUrl + "?action=" + action + "&banner_id=" + encodeURIComponent(bannerId) + "&tool_id=" + encodeURIComponent(toolId) + "&ua=" + encodeURIComponent(navigator.userAgent || "") + "&ref=" + encodeURIComponent(document.referrer || "") + "&url=" + encodeURIComponent(window.location.href || "") + "&t=" + Date.now();
+			} catch (e) {}
+		}
+
+		function applyBannerSize(bannerDiv, w, h) {
+			if (!bannerDiv) { return; }
+			bannerDiv.style.setProperty("width", w + "px", "important");
+			bannerDiv.style.setProperty("height", h + "px", "important");
+			bannerDiv.style.setProperty("overflow", "hidden", "important");
+			bannerDiv.style.setProperty("display", "block", "important");
+			bannerDiv.style.setProperty("line-height", "0", "important");
+			var imgs = bannerDiv.querySelectorAll("img");
+			for (var i = 0; i < imgs.length; i++) {
+				imgs[i].style.setProperty("width", w + "px", "important");
+				imgs[i].style.setProperty("height", h + "px", "important");
+				imgs[i].style.setProperty("object-fit", "contain", "important");
+				imgs[i].style.setProperty("display", "block", "important");
+			}
+			var iframes = bannerDiv.querySelectorAll("iframe");
+			for (var k = 0; k < iframes.length; k++) {
+				iframes[k].style.setProperty("width", w + "px", "important");
+				iframes[k].style.setProperty("height", h + "px", "important");
+				iframes[k].style.setProperty("display", "block", "important");
+			}
+		}
+
+		function closeMobileTopBar(bar) {
+			if (bar && bar.parentNode) { bar.parentNode.removeChild(bar); }
+			try { sessionStorage.setItem(storageKey, "1"); } catch (e) {}
+		}
+
+		function shouldShowMobileTop() {
+			var now = Date.now();
+			if (limitType && limitCount > 0) {
+				var key = "ad_mobile_top_" + toolId + "_" + limitType;
+				var data = JSON.parse(localStorage.getItem(key) || "[]");
+				data = data.filter(function(e) { return (now - e) < (limitType === "hour" ? 3600000 : 86400000); });
+				if (data.length >= limitCount) { return false; }
+			}
+			if (userLimit > 0 && parseInt(localStorage.getItem("ad_mobile_top_user_" + toolId) || "0", 10) >= userLimit) {
+				return false;
+			}
+			if (userHourLimit > 0) {
+				var hourData = JSON.parse(localStorage.getItem("ad_mobile_top_user_hour_" + toolId) || "[]");
+				hourData = hourData.filter(function(e) { return e > (now - 3600000); });
+				if (hourData.length >= userHourLimit) { return false; }
+			}
+			return true;
+		}
+
+		function recordMobileTopDisplay() {
+			var now = Date.now();
+			if (limitType && limitCount > 0) {
+				var key = "ad_mobile_top_" + toolId + "_" + limitType;
+				var data = JSON.parse(localStorage.getItem(key) || "[]");
+				data.push(now);
+				localStorage.setItem(key, JSON.stringify(data));
+			}
+			if (userLimit > 0) {
+				localStorage.setItem("ad_mobile_top_user_" + toolId, (parseInt(localStorage.getItem("ad_mobile_top_user_" + toolId) || "0", 10) + 1).toString());
+			}
+			if (userHourLimit > 0) {
+				var hourData = JSON.parse(localStorage.getItem("ad_mobile_top_user_hour_" + toolId) || "[]");
+				hourData.push(now);
+				localStorage.setItem("ad_mobile_top_user_hour_" + toolId, JSON.stringify(hourData));
+			}
+		}
+
+		function mountMobileTop(banner, data) {
+			if (document.getElementById("ad-mobile-top-" + toolId)) { return; }
+			var w = barWidth;
+			var h = barHeight;
+			if (data && data.mobile_top) {
+				if (data.mobile_top.width > 0) { w = data.mobile_top.width; }
+				if (data.mobile_top.height > 0) { h = data.mobile_top.height; }
+			}
+
+			var bar = document.createElement("div");
+			bar.id = "ad-mobile-top-" + toolId;
+			bar.className = "ad-manager-mobile-top";
+			bar.setAttribute("role", "complementary");
+			bar.setAttribute("aria-label", "פרסומת");
+			bar.style.cssText = "width:100%;display:flex;justify-content:center;align-items:flex-start;background:#fff;box-sizing:border-box;margin:0;padding:0;border-bottom:1px solid #e5e7eb;position:relative;z-index:999990;";
+
+			var inner = document.createElement("div");
+			inner.className = "ad-manager-mobile-top-inner";
+			inner.style.cssText = "width:" + w + "px;height:" + h + "px;position:relative;overflow:hidden;flex-shrink:0;background:#fff;";
+
+			var closeBtn = document.createElement("button");
+			closeBtn.type = "button";
+			closeBtn.setAttribute("aria-label", "סגור פרסומת");
+			closeBtn.innerHTML = "&times;";
+			closeBtn.style.cssText = "position:absolute;top:4px;right:4px;width:28px;height:28px;border:0;border-radius:50%;background:rgba(15,23,42,0.72);color:#fff;font-size:20px;font-weight:700;line-height:1;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 6px rgba(0,0,0,0.25);";
+			closeBtn.onclick = function(ev) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				closeMobileTopBar(bar);
+			};
+
+			var bannerDiv = document.createElement("div");
+			bannerDiv.className = "ad-manager-mobile-top-banner";
+			bannerDiv.innerHTML = banner.html || "";
+			applyBannerSize(bannerDiv, w, h);
+
+			inner.appendChild(closeBtn);
+			inner.appendChild(bannerDiv);
+			bar.appendChild(inner);
+
+			if (document.body.firstChild) {
+				document.body.insertBefore(bar, document.body.firstChild);
+			} else {
+				document.body.appendChild(bar);
+			}
+
+			var trackingUrl = amBuildTrackingUrl(apiUrl);
+			amTrackPixel("impression", banner.id, trackingUrl);
+			amGaEvent("advertising_impression", amAdParams(banner));
+
+			bannerDiv.addEventListener("click", function(ev) {
+				var t = ev.target;
+				var el = (t && typeof t.closest === "function") ? t.closest("[data-banner-id]") : null;
+				var bid = el ? el.getAttribute("data-banner-id") : banner.id;
+				if (!bid) { return; }
+				amTrackPixel("click", bid, trackingUrl);
+				amGaEvent("advertising_click", amAdParams(banner));
+			}, true);
+		}
+
+		function loadMobileTop() {
+			if (!shouldShowMobileTop()) { return; }
+			if (document.getElementById("ad-mobile-top-" + toolId)) { return; }
+			var abortController = new AbortController();
+			var timeoutId = setTimeout(function() { abortController.abort(); }, 5000);
+			fetch(apiUrl, {
+				method: "GET",
+				mode: "cors",
+				credentials: "same-origin",
+				cache: "no-store",
+				signal: abortController.signal
+			})
+			.then(function(response) {
+				clearTimeout(timeoutId);
+				if (!response || !response.ok) { return null; }
+				return response.json().catch(function() { return null; });
+			})
+			.then(function(data) {
+				if (!data || !data.success || !data.banners || !data.banners.length) { return; }
+				var banner = data.banners[0];
+				if (!banner || !banner.html) { return; }
+				mountMobileTop(banner, data);
+				recordMobileTopDisplay();
+			})
+			.catch(function() { clearTimeout(timeoutId); });
+		}
+
+		var started = false;
+		function tryLoad() {
+			if (started) { return; }
+			started = true;
+			if (showDelayMs > 0) {
+				setTimeout(loadMobileTop, showDelayMs);
+			} else {
+				loadMobileTop();
+			}
+		}
+		if (document.body) {
+			tryLoad();
+		} else if (document.readyState === "complete" || document.readyState === "interactive") {
+			document.addEventListener("DOMContentLoaded", tryLoad, { once: true });
+		} else {
+			document.addEventListener("DOMContentLoaded", tryLoad, { once: true });
+		}
+	} catch (e) {}
+})();
+</script>
+<!-- /end HFCM by 99 Robots -->
+<meta name="generator" content="performance-lab 4.1.0; plugins: ">
+<style type="text/css">
+		.jdn-social-container[data-display-type]:not([data-display-type="ticker"]) {
+			font-family: system-ui, -apple-system, sans-serif;
+			font-size: 15px;
+			color: #0f1419;
+			background-color: #ffffff;
+		}
+		.jdn-social-container[data-display-type]:not([data-display-type="ticker"]) .jdn-social-post {
+			border-color: #eff3f4;
+			margin-bottom: 12px;
+			border-radius: 16px;
+		}
+		.jdn-social-container[data-display-type]:not([data-display-type="ticker"]) .jdn-social-post a {
+			color: #1d9bf0;
+		}
+		</style><meta name="generator" content="Elementor 4.0.9; features: additional_custom_breakpoints; settings: css_print_method-external, google_font-disabled, font_display-block">
+			<style>
+				.e-con.e-parent:nth-of-type(n+4):not(.e-lazyloaded):not(.e-no-lazyload),
+				.e-con.e-parent:nth-of-type(n+4):not(.e-lazyloaded):not(.e-no-lazyload) * {
+					background-image: none !important;
+				}
+				@media screen and (max-height: 1024px) {
+					.e-con.e-parent:nth-of-type(n+3):not(.e-lazyloaded):not(.e-no-lazyload),
+					.e-con.e-parent:nth-of-type(n+3):not(.e-lazyloaded):not(.e-no-lazyload) * {
+						background-image: none !important;
+					}
+				}
+				@media screen and (max-height: 640px) {
+					.e-con.e-parent:nth-of-type(n+2):not(.e-lazyloaded):not(.e-no-lazyload),
+					.e-con.e-parent:nth-of-type(n+2):not(.e-lazyloaded):not(.e-no-lazyload) * {
+						background-image: none !important;
+					}
+				}
+			</style>
+			
+<!-- Google Tag Manager snippet added by Site Kit -->
+<script>
+			( function( w, d, s, l, i ) {
+				w[l] = w[l] || [];
+				w[l].push( {'gtm.start': new Date().getTime(), event: 'gtm.js'} );
+				var f = d.getElementsByTagName( s )[0],
+					j = d.createElement( s ), dl = l != 'dataLayer' ? '&l=' + l : '';
+				j.async = true;
+				j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+				f.parentNode.insertBefore( j, f );
+			} )( window, document, 'script', 'dataLayer', 'GTM-5ZDXLG5' );
+			
+</script>
+
+<!-- End Google Tag Manager snippet added by Site Kit -->
+<link rel="icon" href="https://www.jdn.co.il/wp-content/uploads/2022/01/logosite-150x150.png" sizes="32x32" />
+<link rel="icon" href="https://www.jdn.co.il/wp-content/uploads/2022/01/logosite.png" sizes="192x192" />
+<link rel="apple-touch-icon" href="https://www.jdn.co.il/wp-content/uploads/2022/01/logosite.png" />
+<meta name="msapplication-TileImage" content="https://www.jdn.co.il/wp-content/uploads/2022/01/logosite.png" />
+<style type="text/css">div.nsl-container[data-align="left"] {
+    text-align: left;
+}
+
+div.nsl-container[data-align="center"] {
+    text-align: center;
+}
+
+div.nsl-container[data-align="right"] {
+    text-align: right;
+}
+
+
+div.nsl-container div.nsl-container-buttons a[data-plugin="nsl"] {
+    text-decoration: none;
+    box-shadow: none;
+    border: 0;
+}
+
+div.nsl-container .nsl-container-buttons {
+    display: flex;
+    padding: 5px 0;
+}
+
+div.nsl-container.nsl-container-block .nsl-container-buttons {
+    display: inline-grid;
+    grid-template-columns: minmax(145px, auto);
+}
+
+div.nsl-container-block-fullwidth .nsl-container-buttons {
+    flex-flow: column;
+    align-items: center;
+}
+
+div.nsl-container-block-fullwidth .nsl-container-buttons a,
+div.nsl-container-block .nsl-container-buttons a {
+    flex: 1 1 auto;
+    display: block;
+    margin: 5px 0;
+    width: 100%;
+}
+
+div.nsl-container-inline {
+    margin: -5px;
+    text-align: left;
+}
+
+div.nsl-container-inline .nsl-container-buttons {
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+div.nsl-container-inline .nsl-container-buttons a {
+    margin: 5px;
+    display: inline-block;
+}
+
+div.nsl-container-grid .nsl-container-buttons {
+    flex-flow: row;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+div.nsl-container-grid .nsl-container-buttons a {
+    flex: 1 1 auto;
+    display: block;
+    margin: 5px;
+    max-width: 280px;
+    width: 100%;
+}
+
+@media only screen and (min-width: 650px) {
+    div.nsl-container-grid .nsl-container-buttons a {
+        width: auto;
+    }
+}
+
+div.nsl-container .nsl-button {
+    cursor: pointer;
+    vertical-align: top;
+    border-radius: 4px;
+}
+
+div.nsl-container .nsl-button-default {
+    color: #fff;
+    display: flex;
+}
+
+div.nsl-container .nsl-button-icon {
+    display: inline-block;
+}
+
+div.nsl-container .nsl-button-svg-container {
+    flex: 0 0 auto;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+}
+
+div.nsl-container svg {
+    height: 24px;
+    width: 24px;
+    vertical-align: top;
+}
+
+div.nsl-container .nsl-button-default div.nsl-button-label-container {
+    margin: 0 24px 0 12px;
+    padding: 10px 0;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 20px;
+    letter-spacing: .25px;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: clip;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-transform: none;
+    display: inline-block;
+}
+
+div.nsl-container .nsl-button-google[data-skin="light"] {
+    box-shadow: inset 0 0 0 1px #747775;
+    color: #1f1f1f;
+}
+
+div.nsl-container .nsl-button-google[data-skin="dark"] {
+    box-shadow: inset 0 0 0 1px #8E918F;
+    color: #E3E3E3;
+}
+
+div.nsl-container .nsl-button-google[data-skin="neutral"] {
+    color: #1F1F1F;
+}
+
+div.nsl-container .nsl-button-google div.nsl-button-label-container {
+    font-family: "Roboto Medium", Roboto, Helvetica, Arial, sans-serif;
+}
+
+div.nsl-container .nsl-button-apple .nsl-button-svg-container {
+    padding: 0 6px;
+}
+
+div.nsl-container .nsl-button-apple .nsl-button-svg-container svg {
+    height: 40px;
+    width: auto;
+}
+
+div.nsl-container .nsl-button-apple[data-skin="light"] {
+    color: #000;
+    box-shadow: 0 0 0 1px #000;
+}
+
+div.nsl-container .nsl-button-facebook[data-skin="white"] {
+    color: #000;
+    box-shadow: inset 0 0 0 1px #000;
+}
+
+div.nsl-container .nsl-button-facebook[data-skin="light"] {
+    color: #1877F2;
+    box-shadow: inset 0 0 0 1px #1877F2;
+}
+
+div.nsl-container .nsl-button-spotify[data-skin="white"] {
+    color: #191414;
+    box-shadow: inset 0 0 0 1px #191414;
+}
+
+div.nsl-container .nsl-button-apple div.nsl-button-label-container {
+    font-size: 17px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+div.nsl-container .nsl-button-slack div.nsl-button-label-container {
+    font-size: 17px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+div.nsl-container .nsl-button-slack[data-skin="light"] {
+    color: #000000;
+    box-shadow: inset 0 0 0 1px #DDDDDD;
+}
+
+div.nsl-container .nsl-button-tiktok[data-skin="light"] {
+    color: #161823;
+    box-shadow: 0 0 0 1px rgba(22, 24, 35, 0.12);
+}
+
+
+div.nsl-container .nsl-button-kakao {
+    color: rgba(0, 0, 0, 0.85);
+}
+
+.nsl-clear {
+    clear: both;
+}
+
+.nsl-container {
+    clear: both;
+}
+
+.nsl-disabled-provider .nsl-button {
+    filter: grayscale(1);
+    opacity: 0.8;
+}
+
+/*Button align start*/
+
+div.nsl-container-inline[data-align="left"] .nsl-container-buttons {
+    justify-content: flex-start;
+}
+
+div.nsl-container-inline[data-align="center"] .nsl-container-buttons {
+    justify-content: center;
+}
+
+div.nsl-container-inline[data-align="right"] .nsl-container-buttons {
+    justify-content: flex-end;
+}
+
+
+div.nsl-container-grid[data-align="left"] .nsl-container-buttons {
+    justify-content: flex-start;
+}
+
+div.nsl-container-grid[data-align="center"] .nsl-container-buttons {
+    justify-content: center;
+}
+
+div.nsl-container-grid[data-align="right"] .nsl-container-buttons {
+    justify-content: flex-end;
+}
+
+div.nsl-container-grid[data-align="space-around"] .nsl-container-buttons {
+    justify-content: space-around;
+}
+
+div.nsl-container-grid[data-align="space-between"] .nsl-container-buttons {
+    justify-content: space-between;
+}
+
+/* Button align end*/
+
+/* Redirect */
+
+#nsl-redirect-overlay {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: fixed;
+    z-index: 1000000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    backdrop-filter: blur(1px);
+    background-color: RGBA(0, 0, 0, .32);;
+}
+
+#nsl-redirect-overlay-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: white;
+    padding: 30px;
+    border-radius: 10px;
+}
+
+#nsl-redirect-overlay-spinner {
+    content: '';
+    display: block;
+    margin: 20px;
+    border: 9px solid RGBA(0, 0, 0, .6);
+    border-top: 9px solid #fff;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px RGBA(0, 0, 0, .6), 0 0 0 1px RGBA(0, 0, 0, .6);
+    width: 40px;
+    height: 40px;
+    animation: nsl-loader-spin 2s linear infinite;
+}
+
+@keyframes nsl-loader-spin {
+    0% {
+        transform: rotate(0deg)
+    }
+    to {
+        transform: rotate(360deg)
+    }
+}
+
+#nsl-redirect-overlay-title {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    font-size: 18px;
+    font-weight: bold;
+    color: #3C434A;
+}
+
+#nsl-redirect-overlay-text {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    text-align: center;
+    font-size: 14px;
+    color: #3C434A;
+}
+
+/* Redirect END*/</style><style type="text/css">/* Notice fallback */
+#nsl-notices-fallback {
+    position: fixed;
+    right: 10px;
+    top: 10px;
+    z-index: 10000;
+}
+
+.admin-bar #nsl-notices-fallback {
+    top: 42px;
+}
+
+#nsl-notices-fallback > div {
+    position: relative;
+    background: #fff;
+    border-left: 4px solid #fff;
+    box-shadow: 0 1px 1px 0 rgba(0, 0, 0, .1);
+    margin: 5px 15px 2px;
+    padding: 1px 20px;
+}
+
+#nsl-notices-fallback > div.error {
+    display: block;
+    border-left-color: #dc3232;
+}
+
+#nsl-notices-fallback > div.updated {
+    display: block;
+    border-left-color: #46b450;
+}
+
+#nsl-notices-fallback p {
+    margin: .5em 0;
+    padding: 2px;
+}
+
+#nsl-notices-fallback > div:after {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    content: '\00d7';
+    display: block;
+    height: 16px;
+    width: 16px;
+    line-height: 16px;
+    text-align: center;
+    font-size: 20px;
+    cursor: pointer;
+}</style><style>.pswp.pafe-lightbox-modal {display: none;}</style><style id="wp-custom-css">
+#advads-grid-1413 {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-family: 'almoni';
+    overflow: hidden;
+    line-height: normal;
+}
+
+#wpd-bubble-wrapper {
+    width: 50px;
+    height: 50px;
+    left: 20px;
+    bottom: 60px;
+    z-index: 100;
+}
+
+#advads-grid-1412 {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-family: 'almoni';
+    overflow: hidden;
+    line-height: normal;
+}
+
+.elementor-506 .elementor-element.elementor-element-4124e83 .uc_post_list_title a {
+    line-height: 16px;
+}
+
+.elementor-506 .elementor-element.elementor-element-53a162a .uc_post_list_title a {
+    line-height: 16px;
+}
+
+.elementor-506 .elementor-element.elementor-element-cf8c394 .uc_post_list_title a {
+    line-height: 16px;
+}
+
+.elementor-506 .elementor-element.elementor-element-29543a7 .uc_post_list_title a {
+    line-height: 16px;
+}
+</style>
+</head><body></body></html>

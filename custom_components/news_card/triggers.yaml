@@ -1,0 +1,27 @@
+new_article:
+  target:
+    entity:
+      domain: event
+      integration: news_card
+  fields:
+    keywords:
+      required: false
+      example: "rain, storm"
+      selector:
+        text:
+          multiple: true
+
+no_new_articles:
+  target:
+    entity:
+      domain: event
+      integration: news_card
+  fields:
+    for:
+      required: true
+      default:
+        hours: 12
+        minutes: 0
+        seconds: 0
+      selector:
+        duration:

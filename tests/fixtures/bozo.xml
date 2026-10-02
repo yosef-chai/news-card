@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Broken &amp; Co</title><link>https://broken.example/</link>
+<item><title>Good item & unescaped</title><link>/relative/1</link><pubDate>Mon, 28 Sep 2026 08:00:00</pubDate>
+<description><![CDATA[<p>Hello<br/>world <img src="https://pixel.example/t.gif" width="1" height="1"/><img src="/img/a.jpg"/></p>]]></description></item>
+<item><description>No title, no link, only a description that is fairly long so it becomes the title snippet</description></item>
+</channel>

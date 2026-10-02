@@ -1,0 +1,62 @@
+blueprint:
+  name: News Card - notify about new articles
+  description: >-
+    Sends a notification to your phone for every new article from the chosen
+    News Card feeds, with its image and a link that opens the article. Type
+    keywords to be notified only about articles that mention them.
+  domain: automation
+  author: yosef-chai
+  source_url: https://github.com/yosef-chai/news-card/blob/main/blueprints/automation/news_card/notify_new_article.yaml
+  homeassistant:
+    min_version: 2026.8.0
+  input:
+    feeds:
+      name: News feeds
+      description: The feeds to watch (their devices or "New article" event entities).
+      selector:
+        target:
+          entity:
+            - integration: news_card
+              domain: event
+    keywords:
+      name: Keywords
+      description: Only notify when the title or summary contains one of these words. Leave empty for every new article.
+      default: []
+      selector:
+        text:
+          multiple: true
+    notify_device:
+      name: Phone
+      description: A phone with the Home Assistant Companion app.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    include_image:
+      name: Show the article image
+      default: true
+      selector:
+        boolean:
+
+mode: queued
+max: 25
+
+triggers:
+  - trigger: news_card.new_article
+    target: !input feeds
+    options:
+      keywords: !input keywords
+
+variables:
+  include_image: !input include_image
+  article: "{{ trigger.to_state.attributes }}"
+
+actions:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: "{{ article.source or article.feed_title }}"
+    message: "{{ article.title }}"
+    data: >-
+      {% set data = {"url": article.link, "clickAction": article.link, "group": "news_card", "tag": article.id} %}
+      {{ dict(data, image=article.image) if include_image and article.image else data }}

@@ -1,0 +1,411 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a news feed",
+        "description": "Paste an RSS, Atom or JSON feed address, or just a website address and we'll find its feed. Feeds you already have in Feedreader are listed.",
+        "data": {
+          "url": "Feed or website address",
+          "verify_ssl": "Check the security certificate (SSL)"
+        },
+        "data_description": {
+          "url": "For example {example}",
+          "verify_ssl": "Turn off only for a site you know whose certificate is broken. Without the check, someone along the way could listen in."
+        }
+      },
+      "discovery": {
+        "title": "Choose a feed",
+        "description": "That's a web page, not a feed. Here are the feeds we found on it:",
+        "data": {
+          "url": "Feed"
+        }
+      },
+      "reconfigure": {
+        "title": "Change feed address",
+        "data": {
+          "url": "Feed address"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "That address doesn't look right. Use the full address, with http:// or https://.",
+      "cannot_connect": "Couldn't reach the site.",
+      "timeout": "The site took too long to answer. Try again in a moment.",
+      "ssl_error": "The site's security certificate has a problem. If you know the site, you can turn off the check.",
+      "http_error": "The site returned an error ({status}).",
+      "not_a_feed": "We couldn't find a feed at this address.",
+      "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
+      "too_large": "The feed is too big (over 10 MB)."
+    },
+    "abort": {
+      "already_configured": "You already have this feed.",
+      "reconfigure_successful": "Address updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Feed options",
+        "data": {
+          "scan_interval": "Update interval",
+          "max_entries": "Articles to keep",
+          "keywords": "Keywords",
+          "proxy_images": "Load images through Home Assistant",
+          "fetch_page_images": "Find missing images on the article page",
+          "verify_ssl": "Check the security certificate (SSL)"
+        },
+        "data_description": {
+          "scan_interval": "How often to check for news, in minutes.",
+          "max_entries": "Between 1 and 100.",
+          "keywords": "Separate with commas or new lines. A new article with one of them fires the \"Keyword match\" event.",
+          "proxy_images": "Helps when the site blocks images, or when they're on http and your dashboard is on https.",
+          "fetch_page_images": "For an article with no image, peek once at its page and grab the share image.",
+          "verify_ssl": "Turn off only for a site you know whose certificate is broken. Without the check, someone along the way could listen in."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "latest_article": {
+        "name": "Latest article",
+        "state_attributes": {
+          "entry_id": {
+            "name": "Article ID"
+          },
+          "link": {
+            "name": "Link"
+          },
+          "published": {
+            "name": "Published"
+          },
+          "source": {
+            "name": "Source"
+          },
+          "image": {
+            "name": "Image"
+          },
+          "summary": {
+            "name": "Summary"
+          }
+        }
+      },
+      "article_count": {
+        "name": "Articles"
+      },
+      "last_update": {
+        "name": "Last update"
+      },
+      "unread": {
+        "name": "Unread articles"
+      }
+    },
+    "event": {
+      "new_article": {
+        "name": "New article",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "new_article": "New article",
+              "keyword_match": "Keyword match"
+            }
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Couldn't update the feed {url}: {error}"
+    },
+    "entity_not_found": {
+      "message": "{entity_id} isn't a News Card entity."
+    },
+    "entry_not_loaded": {
+      "message": "The feed of {entity_id} hasn't loaded yet."
+    },
+    "refresh_failed": {
+      "message": "Couldn't refresh {title}: {error}"
+    },
+    "phone_not_found": {
+      "message": "{device} isn't a phone with the Home Assistant app."
+    },
+    "tts_required": {
+      "message": "Choose a text-to-speech engine."
+    }
+  },
+  "issues": {
+    "feed_unreachable": {
+      "title": "{title} isn't responding",
+      "fix_flow": {
+        "step": {
+          "url": {
+            "title": "Fix the feed {title}",
+            "description": "We haven't been able to read the feed at {url} for a long time, or the site took it down. What address works now?",
+            "data": {
+              "url": "Feed address"
+            }
+          }
+        },
+        "error": {
+          "invalid_url": "That address doesn't look right. Use the full address, with http:// or https://.",
+          "cannot_connect": "Couldn't reach the site.",
+          "timeout": "The site took too long to answer. Try again in a moment.",
+          "ssl_error": "The site's security certificate has a problem.",
+          "http_error": "The site returned an error ({status}).",
+          "not_a_feed": "We couldn't find a feed at this address.",
+          "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
+          "too_large": "The feed is too big (over 10 MB)."
+        },
+        "abort": {
+          "entry_removed": "The feed was removed."
+        }
+      }
+    }
+  },
+  "services": {
+    "get_entries": {
+      "name": "Get articles",
+      "description": "Returns the articles you already have from one or more feeds, without downloading them again.",
+      "fields": {
+        "entity_id": {
+          "name": "Feeds",
+          "description": "News Card feeds."
+        },
+        "limit": {
+          "name": "Max articles",
+          "description": "Per feed."
+        },
+        "keyword": {
+          "name": "Keyword",
+          "description": "Only articles with this text in the title or summary."
+        },
+        "since": {
+          "name": "Since",
+          "description": "Only articles published after this time."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh",
+      "description": "Checks for new articles right now.",
+      "fields": {
+        "entity_id": {
+          "name": "Feeds",
+          "description": "News Card feeds."
+        }
+      }
+    },
+    "mark_read": {
+      "name": "Mark as read",
+      "description": "Marks articles you've read. The card dims them on every device, and the unread count goes down.",
+      "fields": {
+        "entity_id": {
+          "name": "Feeds",
+          "description": "News Card feeds."
+        },
+        "article_id": {
+          "name": "Article IDs",
+          "description": "Which articles to mark (the `id` from the trigger or from get_entries). Empty = the whole feed."
+        }
+      }
+    },
+    "send_to_phone": {
+      "name": "Send to phone",
+      "description": "Sends the latest article to phones with the Home Assistant app, with its image and a link.",
+      "fields": {
+        "entity_id": {
+          "name": "Feeds",
+          "description": "News Card feeds."
+        },
+        "count": {
+          "name": "Number of articles",
+          "description": "How many of the latest articles from each feed. More than one arrive as a short list."
+        },
+        "include_summary": {
+          "name": "With the summary",
+          "description": "Great for weather forecasts and feeds with short texts."
+        },
+        "keyword": {
+          "name": "Keyword",
+          "description": "Only articles with this text in the title or summary."
+        },
+        "phones": {
+          "name": "Phones",
+          "description": "Phones with the Home Assistant app."
+        },
+        "include_image": {
+          "name": "With the image",
+          "description": "The article image shows up in the notification."
+        }
+      }
+    },
+    "announce": {
+      "name": "Announce on speakers",
+      "description": "Reads the latest article on speakers, in your Home Assistant language. Music pauses for a moment and picks up again.",
+      "fields": {
+        "entity_id": {
+          "name": "Feeds",
+          "description": "News Card feeds."
+        },
+        "count": {
+          "name": "Number of articles",
+          "description": "How many of the latest articles from each feed."
+        },
+        "include_summary": {
+          "name": "With the summary",
+          "description": "Great for weather forecasts and feeds with short texts."
+        },
+        "keyword": {
+          "name": "Keyword",
+          "description": "Only articles with this text in the title or summary."
+        },
+        "speakers": {
+          "name": "Speakers",
+          "description": "Where to read the news."
+        },
+        "tts_engine": {
+          "name": "Text-to-speech engine",
+          "description": "Empty = your preferred engine."
+        }
+      }
+    }
+  },
+  "triggers": {
+    "new_article": {
+      "name": "New article",
+      "description": "Fires when a feed publishes a new article. You can limit it to articles that mention certain words.",
+      "fields": {
+        "keywords": {
+          "name": "Keywords",
+          "description": "Only when one of the words is in the title or summary. Empty = every new article."
+        }
+      }
+    },
+    "no_new_articles": {
+      "name": "No new articles",
+      "description": "Fires when a feed has been quiet for too long, for example when the site is down.",
+      "fields": {
+        "for": {
+          "name": "For",
+          "description": "How long without a new article."
+        }
+      }
+    }
+  },
+  "conditions": {
+    "recent_article": {
+      "name": "Recent article",
+      "description": "Checks if a feed published an article recently. You can limit it to articles that mention certain words.",
+      "fields": {
+        "within": {
+          "name": "Within",
+          "description": "How fresh the article needs to be."
+        },
+        "keywords": {
+          "name": "Keywords",
+          "description": "Only articles with one of the words in the title or summary. Empty = any article."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "alert": {
+      "entry_type": "Alert",
+      "initiate_flow": {
+        "user": "Add alert"
+      },
+      "step": {
+        "user": {
+          "title": "New alert for {feed}",
+          "description": "The news goes to your phone, gets read on speakers, or both.",
+          "data": {
+            "name": "Name",
+            "mode": "When",
+            "notify": "Phones and notifications",
+            "speakers": "Speakers",
+            "tts_engine": "Text-to-speech engine",
+            "include_summary": "With the article summary",
+            "include_image": "With the article image on the phone"
+          },
+          "data_description": {
+            "name": "How it shows up in the list.",
+            "notify": "Phones with the Home Assistant app are already selected.",
+            "speakers": "The headline is read on these speakers. Music pauses for a moment and picks up again.",
+            "tts_engine": "The voice that reads the news, in your Home Assistant language.",
+            "include_summary": "Great for weather forecasts and feeds with short texts."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit alert for {feed}",
+          "data": {
+            "name": "Name",
+            "mode": "When",
+            "notify": "Phones and notifications",
+            "speakers": "Speakers",
+            "tts_engine": "Text-to-speech engine",
+            "include_summary": "With the article summary",
+            "include_image": "With the article image on the phone"
+          },
+          "data_description": {
+            "name": "How it shows up in the list.",
+            "notify": "Phones with the Home Assistant app are already selected.",
+            "speakers": "The headline is read on these speakers. Music pauses for a moment and picks up again.",
+            "tts_engine": "The voice that reads the news, in your Home Assistant language.",
+            "include_summary": "Great for weather forecasts and feeds with short texts."
+          }
+        },
+        "new_article": {
+          "title": "Every new article",
+          "data": {
+            "keywords": "Keywords",
+            "speak_from": "Speakers talk from",
+            "speak_until": "Until"
+          },
+          "data_description": {
+            "keywords": "Only alert about articles with one of the words in the title or summary. Empty = every article.",
+            "speak_from": "Outside these hours the speakers stay quiet, and the alert goes to the phone only."
+          }
+        },
+        "daily": {
+          "title": "At a set time",
+          "data": {
+            "time": "Time",
+            "weekdays": "Days",
+            "count": "Number of articles"
+          },
+          "data_description": {
+            "count": "The latest articles in the feed. For a weather forecast, one is enough."
+          }
+        }
+      },
+      "error": {
+        "no_target": "Choose at least a phone or a speaker.",
+        "tts_required": "Speakers need a text-to-speech engine too.",
+        "no_weekdays": "Choose at least one day."
+      },
+      "abort": {
+        "reconfigure_successful": "The alert was updated."
+      }
+    }
+  },
+  "selector": {
+    "alert_mode": {
+      "options": {
+        "new_article": "Every new article",
+        "daily": "Every day at a set time"
+      }
+    },
+    "weekday": {
+      "options": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
+    }
+  }
+}
