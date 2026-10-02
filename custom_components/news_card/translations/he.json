@@ -1,0 +1,411 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "הוספת פיד חדשות",
+        "description": "מדביקים כתובת של פיד RSS, Atom או JSON, או סתם כתובת של אתר ונמצא בו את הפיד. פידים שכבר יש לך ב-Feedreader מופיעים ברשימה.",
+        "data": {
+          "url": "כתובת הפיד או האתר",
+          "verify_ssl": "בדיקת תעודת האבטחה (SSL)"
+        },
+        "data_description": {
+          "url": "לדוגמה {example}",
+          "verify_ssl": "כדאי לכבות רק באתר שמכירים והתעודה שלו שבורה. בלי הבדיקה, מישהו בדרך יכול לצותת לחיבור."
+        }
+      },
+      "discovery": {
+        "title": "בחירת פיד",
+        "description": "זה דף אינטרנט, לא פיד. מצאנו בו את הפידים האלה:",
+        "data": {
+          "url": "פיד"
+        }
+      },
+      "reconfigure": {
+        "title": "שינוי כתובת הפיד",
+        "data": {
+          "url": "כתובת הפיד"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "הכתובת לא נראית תקינה. צריך כתובת מלאה, עם http:// או https://.",
+      "cannot_connect": "לא הצלחנו להתחבר לאתר.",
+      "timeout": "האתר לא ענה בזמן. אפשר לנסות שוב עוד רגע.",
+      "ssl_error": "יש בעיה בתעודת האבטחה של האתר. אם זה אתר שמכירים, אפשר לכבות את הבדיקה.",
+      "http_error": "האתר החזיר שגיאה ({status}).",
+      "not_a_feed": "לא מצאנו פיד בכתובת הזו.",
+      "invalid_feed": "יש משהו בכתובת הזו, אבל זה לא פיד שאפשר לקרוא.",
+      "too_large": "הפיד גדול מדי (מעל 10MB)."
+    },
+    "abort": {
+      "already_configured": "הפיד הזה כבר אצלך.",
+      "reconfigure_successful": "הכתובת עודכנה."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "הגדרות הפיד",
+        "data": {
+          "scan_interval": "תדירות עדכון",
+          "max_entries": "כמה כתבות לשמור",
+          "keywords": "מילות מפתח",
+          "proxy_images": "טעינת תמונות דרך Home Assistant",
+          "fetch_page_images": "חיפוש תמונה חסרה בדף הכתבה",
+          "verify_ssl": "בדיקת תעודת האבטחה (SSL)"
+        },
+        "data_description": {
+          "scan_interval": "כל כמה דקות לבדוק אם יש חדש.",
+          "max_entries": "בין 1 ל-100.",
+          "keywords": "מפרידים בפסיק או בשורה חדשה. כתבה חדשה עם אחת המילים מפעילה את האירוע \"התאמת מילת מפתח\".",
+          "proxy_images": "עוזר כשהאתר חוסם תמונות, או כשהן ב-http והלוח שלך ב-https.",
+          "fetch_page_images": "לכתבה בלי תמונה, מציצים פעם אחת בדף שלה ולוקחים משם את תמונת השיתוף.",
+          "verify_ssl": "כדאי לכבות רק באתר שמכירים והתעודה שלו שבורה. בלי הבדיקה, מישהו בדרך יכול לצותת לחיבור."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "latest_article": {
+        "name": "הכתבה האחרונה",
+        "state_attributes": {
+          "entry_id": {
+            "name": "מזהה כתבה"
+          },
+          "link": {
+            "name": "קישור"
+          },
+          "published": {
+            "name": "פורסם"
+          },
+          "source": {
+            "name": "מקור"
+          },
+          "image": {
+            "name": "תמונה"
+          },
+          "summary": {
+            "name": "תקציר"
+          }
+        }
+      },
+      "article_count": {
+        "name": "כתבות"
+      },
+      "last_update": {
+        "name": "עדכון אחרון"
+      },
+      "unread": {
+        "name": "כתבות שלא נקראו"
+      }
+    },
+    "event": {
+      "new_article": {
+        "name": "כתבה חדשה",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "new_article": "כתבה חדשה",
+              "keyword_match": "התאמת מילת מפתח"
+            }
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "לא הצלחנו לעדכן את הפיד {url}: {error}"
+    },
+    "entity_not_found": {
+      "message": "{entity_id} לא שייכת ל-News Card."
+    },
+    "entry_not_loaded": {
+      "message": "הפיד של {entity_id} עוד לא נטען."
+    },
+    "refresh_failed": {
+      "message": "לא הצלחנו לרענן את {title}: {error}"
+    },
+    "phone_not_found": {
+      "message": "{device} הוא לא טלפון עם אפליקציית Home Assistant."
+    },
+    "tts_required": {
+      "message": "צריך לבחור מנוע הקראה."
+    }
+  },
+  "issues": {
+    "feed_unreachable": {
+      "title": "הפיד {title} לא עונה",
+      "fix_flow": {
+        "step": {
+          "url": {
+            "title": "תיקון הפיד {title}",
+            "description": "כבר הרבה זמן שלא מצליחים לקרוא את הפיד בכתובת {url}, או שהאתר הוריד אותו. מה הכתובת שעובדת עכשיו?",
+            "data": {
+              "url": "כתובת הפיד"
+            }
+          }
+        },
+        "error": {
+          "invalid_url": "הכתובת לא נראית תקינה. צריך כתובת מלאה, עם http:// או https://.",
+          "cannot_connect": "לא הצלחנו להתחבר לאתר.",
+          "timeout": "האתר לא ענה בזמן. אפשר לנסות שוב עוד רגע.",
+          "ssl_error": "יש בעיה בתעודת האבטחה של האתר.",
+          "http_error": "האתר החזיר שגיאה ({status}).",
+          "not_a_feed": "לא מצאנו פיד בכתובת הזו.",
+          "invalid_feed": "יש משהו בכתובת הזו, אבל זה לא פיד שאפשר לקרוא.",
+          "too_large": "הפיד גדול מדי (מעל 10MB)."
+        },
+        "abort": {
+          "entry_removed": "הפיד הוסר."
+        }
+      }
+    }
+  },
+  "services": {
+    "get_entries": {
+      "name": "קבלת כתבות",
+      "description": "מחזיר את הכתבות ששמורות אצלך מפיד אחד או יותר, בלי להוריד אותן שוב.",
+      "fields": {
+        "entity_id": {
+          "name": "פידים",
+          "description": "הפידים של News Card."
+        },
+        "limit": {
+          "name": "מקסימום כתבות",
+          "description": "לכל פיד."
+        },
+        "keyword": {
+          "name": "מילת מפתח",
+          "description": "רק כתבות שהטקסט הזה מופיע בכותרת או בתקציר שלהן."
+        },
+        "since": {
+          "name": "מאז",
+          "description": "רק כתבות שפורסמו אחרי הזמן הזה."
+        }
+      }
+    },
+    "refresh": {
+      "name": "רענון",
+      "description": "בודק עכשיו אם יצאו כתבות חדשות.",
+      "fields": {
+        "entity_id": {
+          "name": "פידים",
+          "description": "הפידים של News Card."
+        }
+      }
+    },
+    "mark_read": {
+      "name": "סימון כנקרא",
+      "description": "מסמן כתבות שקראת. הכרטיס מעמעם אותן בכל המכשירים, ומונה הכתבות שלא נקראו יורד.",
+      "fields": {
+        "entity_id": {
+          "name": "פידים",
+          "description": "הפידים של News Card."
+        },
+        "article_id": {
+          "name": "מזהי כתבות",
+          "description": "אילו כתבות לסמן (ה-`id` מהטריגר או מ-get_entries). ריק = כל הפיד."
+        }
+      }
+    },
+    "send_to_phone": {
+      "name": "שליחה לטלפון",
+      "description": "שולח את הכתבה האחרונה לטלפונים עם אפליקציית Home Assistant, עם תמונה וקישור.",
+      "fields": {
+        "entity_id": {
+          "name": "פידים",
+          "description": "הפידים של News Card."
+        },
+        "count": {
+          "name": "מספר כתבות",
+          "description": "כמה מהכתבות האחרונות בכל פיד. יותר מאחת יגיעו כרשימה קצרה."
+        },
+        "include_summary": {
+          "name": "עם התקציר",
+          "description": "מעולה לתחזית מזג אוויר ולפידים עם טקסטים קצרים."
+        },
+        "keyword": {
+          "name": "מילת מפתח",
+          "description": "רק כתבות שהטקסט הזה מופיע בכותרת או בתקציר שלהן."
+        },
+        "phones": {
+          "name": "טלפונים",
+          "description": "טלפונים עם אפליקציית Home Assistant."
+        },
+        "include_image": {
+          "name": "עם תמונה",
+          "description": "תמונת הכתבה תופיע בהתראה."
+        }
+      }
+    },
+    "announce": {
+      "name": "הכרזה ברמקולים",
+      "description": "מקריא את הכתבה האחרונה ברמקולים, בשפה של Home Assistant. מוזיקה שמתנגנת עוצרת לרגע וממשיכה.",
+      "fields": {
+        "entity_id": {
+          "name": "פידים",
+          "description": "הפידים של News Card."
+        },
+        "count": {
+          "name": "מספר כתבות",
+          "description": "כמה מהכתבות האחרונות בכל פיד."
+        },
+        "include_summary": {
+          "name": "עם התקציר",
+          "description": "מעולה לתחזית מזג אוויר ולפידים עם טקסטים קצרים."
+        },
+        "keyword": {
+          "name": "מילת מפתח",
+          "description": "רק כתבות שהטקסט הזה מופיע בכותרת או בתקציר שלהן."
+        },
+        "speakers": {
+          "name": "רמקולים",
+          "description": "איפה להקריא את החדשות."
+        },
+        "tts_engine": {
+          "name": "מנוע הקראה",
+          "description": "ריק = המנוע המועדף שלך."
+        }
+      }
+    }
+  },
+  "triggers": {
+    "new_article": {
+      "name": "כתבה חדשה",
+      "description": "מופעל כשיוצאת כתבה חדשה בפיד. אפשר להגביל לכתבות שמזכירות מילים מסוימות.",
+      "fields": {
+        "keywords": {
+          "name": "מילות מפתח",
+          "description": "רק כשאחת המילים מופיעה בכותרת או בתקציר. ריק = כל כתבה חדשה."
+        }
+      }
+    },
+    "no_new_articles": {
+      "name": "אין כתבות חדשות",
+      "description": "מופעל כשפיד שותק יותר מדי זמן, למשל כשהאתר נפל.",
+      "fields": {
+        "for": {
+          "name": "במשך",
+          "description": "כמה זמן בלי כתבה חדשה."
+        }
+      }
+    }
+  },
+  "conditions": {
+    "recent_article": {
+      "name": "כתבה מהזמן האחרון",
+      "description": "בודק אם יצאה בפיד כתבה לאחרונה. אפשר להגביל לכתבות שמזכירות מילים מסוימות.",
+      "fields": {
+        "within": {
+          "name": "בתוך",
+          "description": "כמה טרייה הכתבה צריכה להיות."
+        },
+        "keywords": {
+          "name": "מילות מפתח",
+          "description": "רק כתבות שאחת המילים מופיעה בכותרת או בתקציר שלהן. ריק = כל כתבה."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "alert": {
+      "entry_type": "התראה",
+      "initiate_flow": {
+        "user": "הוספת התראה"
+      },
+      "step": {
+        "user": {
+          "title": "התראה חדשה עבור {feed}",
+          "description": "החדשות יגיעו לטלפון, יוקראו ברמקולים, או גם וגם.",
+          "data": {
+            "name": "שם",
+            "mode": "מתי",
+            "notify": "טלפונים והתראות",
+            "speakers": "רמקולים",
+            "tts_engine": "מנוע הקראה",
+            "include_summary": "עם תקציר הכתבה",
+            "include_image": "עם תמונת הכתבה בטלפון"
+          },
+          "data_description": {
+            "name": "ככה תזהו אותה ברשימה.",
+            "notify": "טלפונים עם אפליקציית Home Assistant כבר מסומנים.",
+            "speakers": "הכותרת תוקרא ברמקולים האלה. מוזיקה שמתנגנת עוצרת לרגע וממשיכה.",
+            "tts_engine": "הקול שמקריא את החדשות, בשפה של Home Assistant.",
+            "include_summary": "מעולה לתחזית מזג אוויר ולפידים עם טקסטים קצרים."
+          }
+        },
+        "reconfigure": {
+          "title": "עריכת התראה עבור {feed}",
+          "data": {
+            "name": "שם",
+            "mode": "מתי",
+            "notify": "טלפונים והתראות",
+            "speakers": "רמקולים",
+            "tts_engine": "מנוע הקראה",
+            "include_summary": "עם תקציר הכתבה",
+            "include_image": "עם תמונת הכתבה בטלפון"
+          },
+          "data_description": {
+            "name": "ככה תזהו אותה ברשימה.",
+            "notify": "טלפונים עם אפליקציית Home Assistant כבר מסומנים.",
+            "speakers": "הכותרת תוקרא ברמקולים האלה. מוזיקה שמתנגנת עוצרת לרגע וממשיכה.",
+            "tts_engine": "הקול שמקריא את החדשות, בשפה של Home Assistant.",
+            "include_summary": "מעולה לתחזית מזג אוויר ולפידים עם טקסטים קצרים."
+          }
+        },
+        "new_article": {
+          "title": "על כל כתבה חדשה",
+          "data": {
+            "keywords": "מילות מפתח",
+            "speak_from": "הרמקולים מדברים מ-",
+            "speak_until": "עד"
+          },
+          "data_description": {
+            "keywords": "להתריע רק על כתבות שאחת המילים מופיעה בכותרת או בתקציר שלהן. ריק = כל כתבה.",
+            "speak_from": "מחוץ לשעות האלה הרמקולים שותקים, וההתראה מגיעה רק לטלפון."
+          }
+        },
+        "daily": {
+          "title": "בשעה קבועה",
+          "data": {
+            "time": "שעה",
+            "weekdays": "ימים",
+            "count": "מספר כתבות"
+          },
+          "data_description": {
+            "count": "הכתבות האחרונות בפיד. לתחזית מזג אוויר מספיקה אחת."
+          }
+        }
+      },
+      "error": {
+        "no_target": "צריך לבחור לפחות טלפון או רמקול.",
+        "tts_required": "לרמקולים צריך גם מנוע הקראה.",
+        "no_weekdays": "צריך לבחור לפחות יום אחד."
+      },
+      "abort": {
+        "reconfigure_successful": "ההתראה עודכנה."
+      }
+    }
+  },
+  "selector": {
+    "alert_mode": {
+      "options": {
+        "new_article": "על כל כתבה חדשה",
+        "daily": "כל יום בשעה קבועה"
+      }
+    },
+    "weekday": {
+      "options": {
+        "sun": "ראשון",
+        "mon": "שני",
+        "tue": "שלישי",
+        "wed": "רביעי",
+        "thu": "חמישי",
+        "fri": "שישי",
+        "sat": "שבת"
+      }
+    }
+  }
+}

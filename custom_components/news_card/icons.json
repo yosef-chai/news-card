@@ -1,0 +1,61 @@
+{
+  "entity": {
+    "sensor": {
+      "latest_article": {
+        "default": "mdi:newspaper-variant-outline"
+      },
+      "article_count": {
+        "default": "mdi:counter"
+      },
+      "last_update": {
+        "default": "mdi:update"
+      },
+      "unread": {
+        "default": "mdi:email-newsletter"
+      }
+    },
+    "event": {
+      "new_article": {
+        "default": "mdi:newspaper-plus",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "new_article": "mdi:newspaper-plus",
+              "keyword_match": "mdi:text-search"
+            }
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "get_entries": {
+      "service": "mdi:newspaper-variant-multiple"
+    },
+    "refresh": {
+      "service": "mdi:refresh"
+    },
+    "mark_read": {
+      "service": "mdi:check-all"
+    },
+    "send_to_phone": {
+      "service": "mdi:cellphone-message"
+    },
+    "announce": {
+      "service": "mdi:bullhorn"
+    }
+  },
+  "triggers": {
+    "new_article": {
+      "trigger": "mdi:newspaper-plus"
+    },
+    "no_new_articles": {
+      "trigger": "mdi:newspaper-remove"
+    }
+  },
+  "conditions": {
+    "recent_article": {
+      "condition": "mdi:newspaper-check"
+    }
+  }
+}

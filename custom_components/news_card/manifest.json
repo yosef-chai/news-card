@@ -1,0 +1,15 @@
+{
+  "domain": "news_card",
+  "name": "News Card",
+  "after_dependencies": ["tts"],
+  "codeowners": ["@yosef-chai"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "websocket_api"],
+  "documentation": "https://github.com/yosef-chai/news-card",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/yosef-chai/news-card/issues",
+  "loggers": ["feedparser", "sgmllib3k"],
+  "requirements": ["feedparser>=6.0.12"],
+  "version": "1.6.1"
+}

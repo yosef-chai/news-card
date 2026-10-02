@@ -1,0 +1,113 @@
+get_entries:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: news_card
+          multiple: true
+    limit:
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    keyword:
+      example: "weather"
+      selector:
+        text:
+    since:
+      selector:
+        datetime:
+
+refresh:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: news_card
+          multiple: true
+
+mark_read:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: news_card
+          multiple: true
+    article_id:
+      example: "3f2a9c1b7e4d5a60"
+      selector:
+        text:
+          multiple: true
+
+send_to_phone:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: news_card
+          multiple: true
+    phones:
+      required: true
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: mobile_app
+    count:
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+    include_summary:
+      default: false
+      selector:
+        boolean:
+    include_image:
+      default: true
+      selector:
+        boolean:
+    keyword:
+      example: "weather"
+      selector:
+        text:
+
+announce:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: news_card
+          multiple: true
+    speakers:
+      required: true
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    tts_engine:
+      selector:
+        entity:
+          domain: tts
+    count:
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+    include_summary:
+      default: false
+      selector:
+        boolean:
+    keyword:
+      example: "weather"
+      selector:
+        text:

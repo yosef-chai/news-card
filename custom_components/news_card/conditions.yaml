@@ -1,0 +1,19 @@
+recent_article:
+  target:
+    entity:
+      integration: news_card
+  fields:
+    within:
+      required: true
+      default:
+        hours: 1
+        minutes: 0
+        seconds: 0
+      selector:
+        duration:
+    keywords:
+      required: false
+      example: "rain, storm"
+      selector:
+        text:
+          multiple: true
