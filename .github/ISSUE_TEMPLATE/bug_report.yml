@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in the integration or the card doesn't work right.
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you got instead. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: feed
+    attributes:
+      label: Feed address
+      description: If it's about a specific feed. Leave out private tokens.
+      placeholder: https://example.com/feed/
+  - type: input
+    id: version
+    attributes:
+      label: News Card version
+      description: HACS shows it, and so does Settings → Devices & services → News Card.
+      placeholder: "1.7.0"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      description: Settings → About.
+      placeholder: "2026.10.0"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: On the feed's page, open ⋮ → **Download diagnostics** and drag the file here. Private tokens in the address are hidden automatically.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Anything about `news_card` from Settings → System → Logs.
+      render: text
