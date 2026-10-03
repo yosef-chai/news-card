@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Unpack, override
+from typing import Any, Unpack, cast, override
+
+import probatio as vol
 
 from homeassistant.const import CONF_OPTIONS, CONF_TARGET
 from homeassistant.core import HomeAssistant
@@ -19,11 +21,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_KEYWORDS, CONF_WITHIN
 from .coordinator import entry_ids_for_target, loaded_coordinator, match_keywords
-
-try:  # ponytail: HA 2026.10 עבר ל-probatio; הסכמה חייבת להיות באותה ספרייה של cv.TARGET_FIELDS
-    import probatio as vol
-except ImportError:
-    import voluptuous as vol  # type: ignore[no-redef]
 
 SCHEMA = vol.Schema(
     {
@@ -42,7 +39,7 @@ class RecentArticleCondition(Condition):
     @override
     @classmethod
     async def async_validate_config(cls, hass: HomeAssistant, config: ConfigType) -> ConfigType:
-        return SCHEMA(config)
+        return cast(ConfigType, SCHEMA(config))
 
     def __init__(self, hass: HomeAssistant, config: ConditionConfig) -> None:
         super().__init__(hass, config)

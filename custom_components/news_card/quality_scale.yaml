@@ -10,9 +10,11 @@ rules:
   config-flow: done
   dependency-transparency: done
   docs-actions: done
+  docs-conditions: done
   docs-high-level-description: done
   docs-installation-instructions: done
   docs-removal-instructions: done
+  docs-triggers: done
   entity-event-setup:
     status: exempt
     comment: Entities only use the coordinator; no extra subscriptions.
@@ -66,7 +68,7 @@ rules:
   entity-device-class: done
   entity-disabled-by-default:
     status: exempt
-    comment: All three sensors and the event entity are useful by default.
+    comment: All four sensors and the event entity are useful by default.
   entity-translations: done
   exception-translations: done
   icon-translations: done
@@ -79,6 +81,10 @@ rules:
   # Platinum
   async-dependency:
     status: exempt
-    comment: Downloads are async (aiohttp); feedparser only parses bytes, in the executor.
+    comment: The dependency does no I/O. Downloads use Home Assistant's aiohttp session; feedparser only parses the bytes, in the executor.
   inject-websession: done
-  strict-typing: todo
+  strict-typing:
+    status: todo
+    comment: >-
+      The integration passes mypy with Home Assistant's strict settings (checked in CI).
+      Waiting for feedparser to ship py.typed; it is on its main branch but not in a release yet (6.0.14).

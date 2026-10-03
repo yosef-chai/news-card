@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, override
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -15,7 +15,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .coordinator import NewsCardConfigEntry, NewsCardCoordinator, NewsFeedData
@@ -66,7 +66,7 @@ SENSORS = (
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
     async_add_entities(NewsSensor(coordinator, d) for d in SENSORS)
@@ -84,10 +84,12 @@ class NewsSensor(NewsCardEntity, SensorEntity):
         self.entity_description = description
 
     @property
+    @override
     def native_value(self) -> Any:
         return self.entity_description.value_fn(self.coordinator)
 
     @property
+    @override
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.key != "latest_article" or not self.coordinator.data.entries:
             return None
@@ -102,6 +104,7 @@ class NewsSensor(NewsCardEntity, SensorEntity):
         }
 
     @property
+    @override
     def entity_picture(self) -> str | None:
         if self.entity_description.key != "latest_article" or not self.coordinator.data.entries:
             return None

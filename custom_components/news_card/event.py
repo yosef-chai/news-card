@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import override
+
 from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import EVENT_TYPE_KEYWORD, EVENT_TYPE_NEW
 from .coordinator import NewsCardConfigEntry, NewsCardCoordinator, match_keywords
@@ -14,7 +16,7 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     async_add_entities([NewsEvent(entry.runtime_data)])
 
@@ -27,6 +29,7 @@ class NewsEvent(NewsCardEntity, EventEntity):
     def __init__(self, coordinator: NewsCardCoordinator) -> None:
         super().__init__(coordinator, "new_article")
 
+    @override
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data

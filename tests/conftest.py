@@ -7,8 +7,9 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker, AiohttpClientMockResponse
 
+from custom_components.news_card.client import USER_AGENT
 from custom_components.news_card.const import DEFAULT_OPTIONS, DOMAIN
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,6 +33,23 @@ def rss(items: list[tuple[str, str]], title: str = "Test feed") -> bytes:
         f'<?xml version="1.0"?><rss version="2.0"><channel><title>{title}</title>'
         f"<link>https://example.com/</link>{body}</channel></rss>"
     ).encode()
+
+
+def refuse_default_user_agent(
+    aioclient_mock: AiohttpClientMocker, url: str, content: bytes, content_type: str = RSS, status: int = 406
+) -> None:
+    """אתר שמסרב ל-User-Agent של News Card ועונה לכל אחר. mock_calls נרשם לפני side_effect."""
+
+    async def respond(method, request_url, data):  # noqa: ARG001
+        if aioclient_mock.mock_calls[-1][3]["User-Agent"] == USER_AGENT:
+            return AiohttpClientMockResponse(method, request_url, status=status)
+        return AiohttpClientMockResponse(method, request_url, response=content, headers={"Content-Type": content_type})
+
+    aioclient_mock.get(url, side_effect=respond)
+
+
+def user_agents(aioclient_mock: AiohttpClientMocker) -> list[str]:
+    return [call[3]["User-Agent"] for call in aioclient_mock.mock_calls]
 
 
 @pytest.fixture(autouse=True)

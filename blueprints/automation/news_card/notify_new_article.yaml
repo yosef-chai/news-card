@@ -8,7 +8,7 @@ blueprint:
   author: yosef-chai
   source_url: https://github.com/yosef-chai/news-card/blob/main/blueprints/automation/news_card/notify_new_article.yaml
   homeassistant:
-    min_version: 2026.8.0
+    min_version: 2026.9.0
   input:
     feeds:
       name: News feeds
@@ -49,7 +49,8 @@ triggers:
 
 variables:
   include_image: !input include_image
-  article: "{{ trigger.to_state.attributes }}"
+  # מעבר דרך JSON: ב-HA 2026.9 המפתחות של ישות אירוע הם enum, והמאפיינים היו מגיעים כמחרוזת
+  article: "{{ trigger.to_state.attributes | to_json | from_json }}"
 
 actions:
   - domain: mobile_app

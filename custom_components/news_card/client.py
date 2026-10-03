@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import re
 import ssl
 
@@ -22,12 +24,74 @@ ACCEPT_FEED = (
 
 
 class FetchError(Exception):
-    """כשל רשת. reason הוא מפתח תרגום."""
+    """כשל רשת. reason הוא מפתח תרגום; retry_after בשניות, כשהשרת ביקש להמתין."""
 
-    def __init__(self, reason: str, status: int | None = None) -> None:
+    def __init__(self, reason: str, status: int | None = None, retry_after: int | None = None) -> None:
         super().__init__(f"{reason} ({status})" if status else reason)
         self.reason = reason
         self.status = status
+        self.retry_after = retry_after
+
+
+# אתגר JavaScript של שירות הגנה (Cloudflare, DataDome, Imperva): רק דפדפן אמיתי עובר, גם עם User-Agent של דפדפן
+CHALLENGE_HEADERS = ("x-datadome", "x-iinfo")
+RETRY_AFTER_MAX = 24 * 3600
+
+# סירובים שבהם User-Agent אחר יכול לעזור
+FALLBACK_REASONS = ("refused", "rate_limited")
+USER_AGENT_BROWSER = "browser"
+USER_AGENT_MAX = 512
+# ponytail: גרסת Chrome קבועה; לעדכן מדי פעם, אתרים מחמירים דוחים גרסאות ישנות מאוד
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+)
+
+
+def resolve_user_agent(option: str | None) -> str | None:
+    """ערך ההגדרה ל-User-Agent בפועל: ריק = אין, "browser" = Chrome עדכני, אחרת הטקסט עצמו."""
+    option = (option or "").strip()
+    return BROWSER_USER_AGENT if option == USER_AGENT_BROWSER else option or None
+
+
+def valid_user_agent(option: str) -> bool:
+    """טקסט שאפשר לשלוח ככותרת: מודפס, בלי שורות חדשות, באורך סביר."""
+    return len(option) <= USER_AGENT_MAX and option.isprintable()
+
+
+def _retry_after(value: str | None) -> int | None:
+    """Retry-After בשניות: מספר או תאריך HTTP."""
+    if not value:
+        return None
+    try:
+        seconds = int(value) if value.strip().isdigit() else int(
+            (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
+        )
+    except (TypeError, ValueError):
+        return None
+    return min(max(seconds, 0), RETRY_AFTER_MAX)
+
+
+def http_error(resp: aiohttp.ClientResponse) -> FetchError:
+    """ממפה תשובת שגיאה לסיבה שאפשר להסביר למשתמש."""
+    status = resp.status
+    challenge = resp.headers.get("cf-mitigated") == "challenge" or any(h in resp.headers for h in CHALLENGE_HEADERS)
+    if challenge and status in (401, 403, 405, 429, 503):
+        reason = "blocked"
+    elif status in (403, 406):
+        # 406 עם Accept שכולל */* הוא כמעט תמיד חומת אש (WAF), לא בעיית פורמט
+        reason = "refused"
+    elif status in (401, 407):
+        reason = "auth_required"
+    elif status in (404, 410):
+        reason = "not_found"
+    elif status == 429:
+        reason = "rate_limited"
+    elif status >= 500:
+        reason = "server_error"
+    else:
+        reason = "http_error"
+    return FetchError(reason, status, _retry_after(resp.headers.get("Retry-After")))
 
 
 @dataclass
@@ -40,6 +104,7 @@ class FetchResult:
     etag: str | None
     modified: str | None
     url: str
+    charset: str | None = None
 
 
 async def async_fetch(
@@ -52,9 +117,10 @@ async def async_fetch(
     modified: str | None = None,
     truncate: bool = False,
     timeout: float = FETCH_TIMEOUT,
+    user_agent: str | None = None,
 ) -> FetchResult:
     """הורדה עם תקרת גודל. truncate=True חותך במקום להיכשל (לדפי HTML)."""
-    headers = {"User-Agent": USER_AGENT, "Accept": accept}
+    headers = {"User-Agent": user_agent or USER_AGENT, "Accept": accept}
     if etag:
         headers["If-None-Match"] = etag
     if modified:
@@ -65,7 +131,7 @@ async def async_fetch(
                 if resp.status == 304:
                     return FetchResult(304, None, None, etag, modified, str(resp.url))
                 if resp.status >= 400:
-                    raise FetchError("http_error", resp.status)
+                    raise http_error(resp)
                 length = int(resp.headers.get("Content-Length") or 0)
                 if length > max_bytes and not truncate:
                     raise FetchError("too_large")
@@ -74,6 +140,7 @@ async def async_fetch(
                     body.extend(chunk)
                     if len(body) > max_bytes:
                         if truncate:
+                            del body[max_bytes:]
                             break
                         raise FetchError("too_large")
                 return FetchResult(
@@ -83,6 +150,7 @@ async def async_fetch(
                     resp.headers.get("ETag"),
                     resp.headers.get("Last-Modified"),
                     str(resp.url),
+                    resp.charset,
                 )
     except FetchError:
         raise

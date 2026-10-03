@@ -21,10 +21,12 @@ from pytest_homeassistant_custom_component.common import (
 from pytest_homeassistant_custom_component.components.diagnostics import get_diagnostics_for_config_entry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
+from custom_components.news_card.client import BROWSER_USER_AGENT, USER_AGENT
 from custom_components.news_card.const import DEFAULT_OPTIONS, DOMAIN, EVENT_NEW_ARTICLE
+from custom_components.news_card.diagnostics import redact_url
 from custom_components.news_card.feed import make_id
 
-from .conftest import FEED_URL, RSS, fixture, rss
+from .conftest import FEED_URL, RSS, fixture, refuse_default_user_agent, rss, user_agents
 
 SENSOR = "sensor.jdn_latest_article"
 EVENT = "event.jdn_new_article"
@@ -193,6 +195,114 @@ async def test_repair_issue_on_404_and_cleared(
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
+async def test_blocked_site_backs_off(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    """חסימת בוטים מוצגת מיד כתקלה מוסברת, וכל כשל רצוף מאט את הניסיונות."""
+    coordinator = loaded.runtime_data
+    issue_id = f"feed_unreachable_{loaded.entry_id}"
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=403, headers={"cf-mitigated": "challenge"})
+    await _refresh(hass, freezer)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue.translation_key == "feed_blocked"
+    assert issue.translation_placeholders["status"] == "403"
+    assert coordinator.last_error == "blocked"
+    assert coordinator.update_interval == timedelta(minutes=15)
+    await _refresh(hass, freezer)
+    await _refresh(hass, freezer)
+    assert coordinator.update_interval == timedelta(minutes=60)
+    await _refresh(hass, freezer)
+    assert coordinator.update_interval == timedelta(hours=1)  # תקרה
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=429, headers={"Retry-After": "7200"})
+    await _refresh(hass, freezer)
+    assert coordinator.last_error == "rate_limited"
+    assert coordinator.update_interval == timedelta(hours=2)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, content=fixture("jdn.xml"), headers={"Content-Type": RSS})
+    await _refresh(hass, freezer)
+    assert coordinator.update_interval == timedelta(minutes=15)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def _use_user_agent(hass: HomeAssistant, entry: MockConfigEntry, user_agent: str) -> None:
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "user_agent": user_agent})
+    await hass.async_block_till_done()  # מאזין העדכון טוען את הרשומה מחדש
+
+
+async def test_user_agent_fallback(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    """ה-User-Agent מההגדרות נשלח רק אחרי סירוב, נשאר ליממה, ואז בודקים שוב את הרגיל."""
+    await _use_user_agent(hass, loaded, "browser")
+    coordinator = loaded.runtime_data
+    aioclient_mock.clear_requests()
+    refuse_default_user_agent(aioclient_mock, FEED_URL, fixture("jdn.xml"))
+    await _refresh(hass, freezer)
+    assert coordinator.last_update_success
+    assert user_agents(aioclient_mock) == [USER_AGENT, BROWSER_USER_AGENT]
+    assert coordinator.fallback_active
+
+    await _refresh(hass, freezer)  # ישר עם החלופי, בלי בקשה כפולה
+    assert user_agents(aioclient_mock) == [USER_AGENT, BROWSER_USER_AGENT, BROWSER_USER_AGENT]
+
+    freezer.tick(timedelta(hours=24))
+    await _refresh(hass, freezer)  # אחרי יממה מנסים שוב את הרגיל
+    assert user_agents(aioclient_mock)[-2:] == [USER_AGENT, BROWSER_USER_AGENT]
+
+    # גם החלופי נדחה: תקלה שמציעה User-Agent אחר, ובפעם הבאה מתחילים מהרגיל
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=403)
+    await _refresh(hass, freezer)
+    assert coordinator.last_error == "refused"
+    assert not coordinator.fallback_active
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, f"feed_unreachable_{loaded.entry_id}")
+    assert issue.translation_key == "feed_refused"
+    assert issue.data["reason"] == "refused"
+    await _refresh(hass, freezer)
+    assert user_agents(aioclient_mock) == [BROWSER_USER_AGENT, USER_AGENT, BROWSER_USER_AGENT]
+
+
+async def test_no_fallback_without_user_agent_or_for_challenge(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=403)
+    await _refresh(hass, freezer)
+    assert user_agents(aioclient_mock) == [USER_AGENT]
+    await _use_user_agent(hass, loaded, "MyReader/1.0")
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=403, headers={"cf-mitigated": "challenge"})
+    await _refresh(hass, freezer)
+    assert user_agents(aioclient_mock) == [USER_AGENT]  # אתגר JavaScript: User-Agent אחר לא יעזור
+
+
+async def test_refused_repair_flow_sets_user_agent(
+    hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+) -> None:
+    assert await async_setup_component(hass, "repairs", {})
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=406)
+    await _refresh(hass, freezer)
+    client = await hass_client()
+    resp = await client.post("/api/repairs/issues/fix", json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"})
+    flow = await resp.json()
+    assert [f["name"] for f in flow["data_schema"]] == ["url", "user_agent"]
+    url = f"/api/repairs/issues/fix/{flow['flow_id']}"
+    resp = await client.post(url, json={"url": FEED_URL, "user_agent": "a\tb"})
+    assert (await resp.json())["errors"] == {"user_agent": "invalid_user_agent"}
+    resp = await client.post(url, json={"url": FEED_URL, "user_agent": "MyReader/1.0"})
+    assert (await resp.json())["errors"] == {"base": "still_refused"}
+    aioclient_mock.clear_requests()
+    refuse_default_user_agent(aioclient_mock, FEED_URL, fixture("jdn.xml"))
+    resp = await client.post(url, json={"url": FEED_URL, "user_agent": "browser"})
+    assert (await resp.json())["type"] == "create_entry"
+    assert loaded.options["user_agent"] == "browser"
+
+
 async def test_repair_issue_after_long_failure(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
 ) -> None:
@@ -217,8 +327,9 @@ async def test_repair_flow(
     resp = await client.post("/api/repairs/issues/fix", json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"})
     flow = await resp.json()
     assert flow["step_id"] == "url"
+    aioclient_mock.get("https://www.jdn.co.il/", status=404)
     resp = await client.post(f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": FEED_URL})
-    assert (await resp.json())["errors"] == {"base": "http_error"}
+    assert (await resp.json())["errors"] == {"base": "not_found"}
     resp = await client.post(f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": new})
     assert (await resp.json())["type"] == "create_entry"
     assert loaded.data["url"] == new
@@ -292,10 +403,12 @@ async def test_image_proxy_rejects_svg_and_errors(
     entries = loaded.runtime_data.data.entries
     aioclient_mock.get(entries[0]["image"], content=b"<svg/>", headers={"Content-Type": "image/svg+xml"})
     aioclient_mock.get(entries[1]["image"], status=500)
+    aioclient_mock.get(entries[2]["image"], content=b"x", headers={"Content-Length": str(20 * 1024 * 1024)})
     client = await hass_client()
     base = f"/api/news_card/image/{loaded.entry_id}/"
     assert (await client.get(base + make_id(entries[0]["image"]))).status == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
     assert (await client.get(base + make_id(entries[1]["image"]))).status == HTTPStatus.BAD_GATEWAY
+    assert (await client.get(base + make_id(entries[2]["image"]))).status == HTTPStatus.BAD_GATEWAY
 
 
 async def test_image_proxy_requires_auth(hass: HomeAssistant, hass_client_no_auth, loaded: MockConfigEntry) -> None:
@@ -336,9 +449,12 @@ async def test_cached_data_on_startup_failure(
 
 async def test_diagnostics(hass: HomeAssistant, hass_client, loaded: MockConfigEntry) -> None:
     diag = await get_diagnostics_for_config_entry(hass, hass_client, loaded)
+    assert diag["url"] == FEED_URL
     assert diag["entry_count"] == 8
     assert diag["entries_with_image"] == 8
     assert len(diag["sample"]) == 3
+    # טוקן של פיד פרטי לא יוצא בקובץ האבחון
+    assert redact_url("https://user:secret@example.com:8443/feed?token=abc#x") == "https://example.com:8443/feed?**REDACTED**"
 
 
 async def test_card_served(hass: HomeAssistant, hass_client, loaded: MockConfigEntry) -> None:

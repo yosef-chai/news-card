@@ -6,7 +6,7 @@ from datetime import datetime, time
 import logging
 from typing import Any
 
-import voluptuous as vol
+import probatio as vol
 
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, ServiceCall, callback
@@ -38,6 +38,8 @@ from .coordinator import NewsCardConfigEntry, NewsCardCoordinator, coordinators_
 from .feed import NewsEntry, truncate
 
 _LOGGER = logging.getLogger(__name__)
+
+type ServiceCallSpec = tuple[str, str, dict[str, Any]]
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 # פעם אחת לכל כתבה עד הסף; מעליו הודעה מרוכזת אחת, כדי לא להציף את הטלפון
@@ -163,7 +165,7 @@ class FeedAlert:
             ]
         return [(self.title, "\n".join(f"• {a['title']}" for a in articles), None)]
 
-    def _notify_call(self, target: str, title: str, message: str, article: NewsEntry | None) -> tuple[str, str, dict]:
+    def _notify_call(self, target: str, title: str, message: str, article: NewsEntry | None) -> ServiceCallSpec:
         """ישות notify (התראות מודרניות) או שירות notify (כמו אפליקציית הטלפון)."""
         if self.hass.states.get(target):
             return ("notify", "send_message", {ATTR_ENTITY_ID: target, "title": title, "message": message})
@@ -186,7 +188,7 @@ class FeedAlert:
             return ". ".join(filter(None, [intro, article["title"], self._summary(article, SPEECH_SUMMARY_MAX)]))
         return ". ".join([self.feed_title, *(a["title"] for a in articles)])
 
-    async def _async_call(self, call: tuple[str, str, dict]) -> None:
+    async def _async_call(self, call: ServiceCallSpec) -> None:
         domain, service, data = call
         try:
             await self.hass.services.async_call(domain, service, data, blocking=True)
@@ -235,12 +237,8 @@ def phone_targets(hass: HomeAssistant, device_ids: list[str]) -> list[str]:
     targets: list[str] = []
     for device_id in device_ids:
         device = devices.async_get(device_id)
-        # ponytail: config_entry_id יחיד מ-2026.8; config_entries ישן נשאר לגרסאות קודמות
-        entry_ids = [device.config_entry_id] if device and getattr(device, "config_entry_id", None) else list(getattr(device, "config_entries", []))
-        app = next(
-            (e for i in entry_ids if (e := hass.config_entries.async_get_entry(i)) and e.domain == "mobile_app"), None
-        )
-        if app is None or device is None:
+        app = hass.config_entries.async_get_entry(device.config_entry_id) if device else None
+        if app is None or app.domain != "mobile_app" or device is None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="phone_not_found", translation_placeholders={"device": device_id}
             )

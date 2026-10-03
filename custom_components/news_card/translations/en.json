@@ -13,17 +13,43 @@
           "verify_ssl": "Turn off only for a site you know whose certificate is broken. Without the check, someone along the way could listen in."
         }
       },
-      "discovery": {
+      "select_feed": {
         "title": "Choose a feed",
-        "description": "That's a web page, not a feed. Here are the feeds we found on it:",
+        "description": "That's a web page, not a feed. Here's what we found on the site:",
         "data": {
           "url": "Feed"
+        },
+        "data_description": {
+          "url": "The feed to add. You can add the others later the same way."
+        }
+      },
+      "user_agent": {
+        "title": "The site refused",
+        "description": "{host} refused News Card ({status}). Some sites only answer requests that look like a browser. You can try again with a different User-Agent, the name Home Assistant introduces itself with. It's sent only when the normal request is refused, and you can change it later in the feed options.",
+        "data": {
+          "user_agent": "User-Agent"
+        },
+        "data_description": {
+          "user_agent": "Pick **Browser** to look like Chrome, or type your own."
+        }
+      },
+      "moved": {
+        "title": "The feed moved",
+        "description": "There's no feed at this address anymore. Here's what we found on the site's homepage:",
+        "data": {
+          "url": "Feed"
+        },
+        "data_description": {
+          "url": "The feed that replaced the old address."
         }
       },
       "reconfigure": {
         "title": "Change feed address",
         "data": {
           "url": "Feed address"
+        },
+        "data_description": {
+          "url": "A direct feed address. The feed keeps its entities, alerts and options."
         }
       }
     },
@@ -35,7 +61,15 @@
       "http_error": "The site returned an error ({status}).",
       "not_a_feed": "We couldn't find a feed at this address.",
       "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
-      "too_large": "The feed is too big (over 10 MB)."
+      "too_large": "The feed is too big (over 10 MB).",
+      "blocked": "The site lets only browsers in and blocks feed readers ({status}). There's no way around that from Home Assistant. If the site has another feed address, try that one.",
+      "auth_required": "This feed needs a username and password ({status}), and feeds that need a login aren't supported.",
+      "not_found": "There's nothing at this address ({status}). The feed may have moved; enter the website address and we'll look for it.",
+      "rate_limited": "The site is asking us to slow down ({status}). Try again in a few minutes.",
+      "server_error": "The site is having trouble ({status}). Try again later.",
+      "refused": "The site refused the request ({status}). You can try a different User-Agent in the feed options.",
+      "still_refused": "The site still refuses ({status}). Try another User-Agent. If nothing works, the site lets only real browsers in.",
+      "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
     },
     "abort": {
       "already_configured": "You already have this feed.",
@@ -52,9 +86,11 @@
           "keywords": "Keywords",
           "proxy_images": "Load images through Home Assistant",
           "fetch_page_images": "Find missing images on the article page",
-          "verify_ssl": "Check the security certificate (SSL)"
+          "verify_ssl": "Check the security certificate (SSL)",
+          "user_agent": "User-Agent when the site refuses"
         },
         "data_description": {
+          "user_agent": "Sent only when the site refuses the normal request. **Browser** looks like Chrome, or type your own. Leave empty to turn it off.",
           "scan_interval": "How often to check for news, in minutes.",
           "max_entries": "Between 1 and 100.",
           "keywords": "Separate with commas or new lines. A new article with one of them fires the \"Keyword match\" event.",
@@ -63,6 +99,9 @@
           "verify_ssl": "Turn off only for a site you know whose certificate is broken. Without the check, someone along the way could listen in."
         }
       }
+    },
+    "error": {
+      "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
     }
   },
   "entity": {
@@ -144,6 +183,9 @@
             "description": "We haven't been able to read the feed at {url} for a long time, or the site took it down. What address works now?",
             "data": {
               "url": "Feed address"
+            },
+            "data_description": {
+              "url": "The feed keeps its entities, alerts and options."
             }
           }
         },
@@ -155,7 +197,93 @@
           "http_error": "The site returned an error ({status}).",
           "not_a_feed": "We couldn't find a feed at this address.",
           "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
-          "too_large": "The feed is too big (over 10 MB)."
+          "too_large": "The feed is too big (over 10 MB).",
+          "blocked": "The site lets only browsers in and blocks feed readers ({status}). Try another feed address.",
+          "auth_required": "This feed needs a username and password ({status}), and feeds that need a login aren't supported.",
+          "not_found": "There's nothing at this address ({status}).",
+          "rate_limited": "The site is asking us to slow down ({status}). Try again in a few minutes.",
+          "server_error": "The site is having trouble ({status}). Try again later.",
+          "refused": "The site refused the request ({status}). You can try a different User-Agent in the feed options.",
+          "still_refused": "The site still refuses ({status}), even with the User-Agent from the feed options.",
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
+        },
+        "abort": {
+          "entry_removed": "The feed was removed."
+        }
+      }
+    },
+    "feed_blocked": {
+      "title": "{title}'s site is blocking Home Assistant",
+      "fix_flow": {
+        "step": {
+          "url": {
+            "title": "Fix the feed {title}",
+            "description": "The site at {url} lets only browsers in and blocks feed readers ({status}), so the feed isn't updating. If the site has another feed address, enter it here. If the site lifts the block, this message goes away by itself.",
+            "data": {
+              "url": "Feed address"
+            },
+            "data_description": {
+              "url": "The feed keeps its entities, alerts and options."
+            }
+          }
+        },
+        "error": {
+          "invalid_url": "That address doesn't look right. Use the full address, with http:// or https://.",
+          "cannot_connect": "Couldn't reach the site.",
+          "timeout": "The site took too long to answer. Try again in a moment.",
+          "ssl_error": "The site's security certificate has a problem.",
+          "http_error": "The site returned an error ({status}).",
+          "not_a_feed": "We couldn't find a feed at this address.",
+          "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
+          "too_large": "The feed is too big (over 10 MB).",
+          "blocked": "This address is blocked too ({status}). Try another feed address.",
+          "auth_required": "This feed needs a username and password ({status}), and feeds that need a login aren't supported.",
+          "not_found": "There's nothing at this address ({status}).",
+          "rate_limited": "The site is asking us to slow down ({status}). Try again in a few minutes.",
+          "server_error": "The site is having trouble ({status}). Try again later.",
+          "refused": "The site refused the request ({status}). You can try a different User-Agent in the feed options.",
+          "still_refused": "The site still refuses ({status}), even with the User-Agent from the feed options.",
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
+        },
+        "abort": {
+          "entry_removed": "The feed was removed."
+        }
+      }
+    },
+    "feed_refused": {
+      "title": "{title}'s site is refusing Home Assistant",
+      "fix_flow": {
+        "step": {
+          "url": {
+            "title": "Fix the feed {title}",
+            "description": "The site at {url} refused the feed ({status}). Some sites only answer requests that look like a browser. Try a different User-Agent, or enter another feed address. If the site starts answering again, this message goes away by itself.",
+            "data": {
+              "url": "Feed address",
+              "user_agent": "User-Agent"
+            },
+            "data_description": {
+              "url": "The feed keeps its entities, alerts and options.",
+              "user_agent": "Sent only when the normal request is refused. **Browser** looks like Chrome, or type your own."
+            }
+          }
+        },
+        "error": {
+          "invalid_url": "That address doesn't look right. Use the full address, with http:// or https://.",
+          "cannot_connect": "Couldn't reach the site.",
+          "timeout": "The site took too long to answer. Try again in a moment.",
+          "ssl_error": "The site's security certificate has a problem.",
+          "http_error": "The site returned an error ({status}).",
+          "not_a_feed": "We couldn't find a feed at this address.",
+          "invalid_feed": "There's something at this address, but it isn't a feed we can read.",
+          "too_large": "The feed is too big (over 10 MB).",
+          "blocked": "The site lets only browsers in and blocks feed readers ({status}). A different User-Agent won't help here.",
+          "auth_required": "This feed needs a username and password ({status}), and feeds that need a login aren't supported.",
+          "not_found": "There's nothing at this address ({status}).",
+          "rate_limited": "The site is asking us to slow down ({status}). Try again in a few minutes.",
+          "server_error": "The site is having trouble ({status}). Try again later.",
+          "refused": "The site refused the request ({status}). Choose a User-Agent and try again.",
+          "still_refused": "The site still refuses ({status}). Try another User-Agent. If nothing works, the site lets only real browsers in.",
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
         },
         "abort": {
           "entry_removed": "The feed was removed."
@@ -330,6 +458,8 @@
           },
           "data_description": {
             "name": "How it shows up in the list.",
+            "mode": "Each article as soon as it's published, or a roundup at a set time.",
+            "include_image": "The image shows up in the phone notification.",
             "notify": "Phones with the Home Assistant app are already selected.",
             "speakers": "The headline is read on these speakers. Music pauses for a moment and picks up again.",
             "tts_engine": "The voice that reads the news, in your Home Assistant language.",
@@ -349,6 +479,8 @@
           },
           "data_description": {
             "name": "How it shows up in the list.",
+            "mode": "Each article as soon as it's published, or a roundup at a set time.",
+            "include_image": "The image shows up in the phone notification.",
             "notify": "Phones with the Home Assistant app are already selected.",
             "speakers": "The headline is read on these speakers. Music pauses for a moment and picks up again.",
             "tts_engine": "The voice that reads the news, in your Home Assistant language.",
@@ -364,7 +496,8 @@
           },
           "data_description": {
             "keywords": "Only alert about articles with one of the words in the title or summary. Empty = every article.",
-            "speak_from": "Outside these hours the speakers stay quiet, and the alert goes to the phone only."
+            "speak_from": "Outside these hours the speakers stay quiet, and the alert goes to the phone only.",
+            "speak_until": "Can be after midnight, for example from 22:00 until 06:00."
           }
         },
         "daily": {
@@ -375,6 +508,8 @@
             "count": "Number of articles"
           },
           "data_description": {
+            "time": "When the roundup goes out.",
+            "weekdays": "On the other days, nothing is sent.",
             "count": "The latest articles in the feed. For a weather forecast, one is enough."
           }
         }
@@ -390,6 +525,11 @@
     }
   },
   "selector": {
+    "user_agent": {
+      "options": {
+        "browser": "Browser (Chrome)"
+      }
+    },
     "alert_mode": {
       "options": {
         "new_article": "Every new article",

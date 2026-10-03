@@ -134,8 +134,227 @@ def test_html_to_text() -> None:
 
 
 def test_discover_ignores_non_feeds() -> None:
-    html = '<link rel="alternate" type="application/json+oembed" href="/o"><link rel="alternate" type="application/atom+xml" href="/atom">'
-    assert discover_feeds(html, "https://a.b/") == [("https://a.b/atom", "https://a.b/atom")]
+    html = (
+        '<link rel="alternate" type="application/json+oembed" href="/o"><link rel="alternate" type="application/atom+xml" href="/atom">'
+        '<link rel="alternate" type="application/json" href="/wp-json/wp/v2/posts/1">'
+        '<link rel="alternate" type="application/json" title="JSON Feed" href="/feeds/json">'
+    )
+    assert discover_feeds(html, "https://a.b/")[0] == [
+        ("https://a.b/atom", "https://a.b/atom"),
+        ("https://a.b/feeds/json", "JSON Feed"),
+    ]
+
+
+def test_feed_like_links() -> None:
+    """אתר בלי <link> לפיד: קישורי "RSS" מכל מקום, ונתיבי rss/feed רק מהאתר עצמו ולא דפי כתבה."""
+    html = """<a href="/">home</a><a href="/music-feed/2026/clip.htm">clip</a><a href="/rss">RSS</a>
+    <a href="https://x.com/site_feed">X</a><a href="https://feeds.feedburner.com/site">RSS 2.0</a>
+    <a href="/srv/news-rss">חדשות</a><a href="https://rss.a.b/feed/1"><b>ספורט</b></a><a href="/forum/external.php?type=RSS2">forum</a>"""
+    declared, links = discover_feeds(html, "https://www.a.b/")
+    assert declared == []
+    assert links == [
+        ("https://www.a.b/rss", "RSS"),
+        ("https://feeds.feedburner.com/site", "RSS 2.0"),
+        ("https://www.a.b/srv/news-rss", "חדשות"),
+        ("https://rss.a.b/feed/1", "ספורט"),
+        ("https://www.a.b/forum/external.php?type=RSS2", "forum"),
+    ]
+
+
+def _rss(items: str, channel: str = "", ns: str = "") -> bytes:
+    return (
+        f'<rss version="2.0" {ns}><channel><title>T</title><link>https://a.b/</link>{channel}{items}</channel></rss>'
+    ).encode()
+
+
+def test_double_escaped_html() -> None:
+    body = _rss(
+        "<item><title>Q&amp;amp;A</title><link>https://a.b/1</link><description><![CDATA["
+        "&lt;img src=&quot;https://a.b/i.jpg&quot;&gt;&lt;p&gt;Hi &amp;amp; bye&lt;/p&gt;]]></description></item>"
+    )
+    entry = parse_feed(body, "https://a.b/feed").entries[0]
+    assert entry["title"] == "Q&A"
+    assert entry["summary"] == "Hi & bye"
+    assert entry["image"] == "https://a.b/i.jpg"
+
+
+@pytest.mark.parametrize(
+    ("description", "summary"),
+    [
+        ("<p>Body.</p><p>The post <a href='x'>X</a> first appeared on <a href='y'>Y</a>.</p>", "Body."),
+        ("<p>Body.</p><p>Read more of this story at Slashdot.</p>", "Body."),
+        ("<p>Some text Read More</p>", "Some text…"),
+        ("<p>Some text [&#8230;]</p><p>המשך קריאה</p>", "Some text…"),
+        ("<p>You can read more about it on our blog.</p>", "You can read more about it on our blog."),
+    ],
+)
+def test_summary_boilerplate(description: str, summary: str) -> None:
+    body = _rss(f"<item><title>t</title><link>https://a.b/1</link><description><![CDATA[{description}]]></description></item>")
+    assert parse_feed(body, "https://a.b/feed").entries[0]["summary"] == summary
+
+
+def test_author_profile_url_and_long_title() -> None:
+    body = _rss(
+        f"<item><title>{'word ' * 100}</title><link>https://a.b/1</link>"
+        "<dc:creator>Duet ! (https://www.flickr.com/people/115338398@N03/)</dc:creator></item>"
+        "<item><title>lemmy</title><link>https://a.b/2</link><dc:creator>https://lemmy.ca/u/Crumpled6273</dc:creator></item>",
+        ns='xmlns:dc="http://purl.org/dc/elements/1.1/"',
+    )
+    flickr, lemmy = parse_feed(body, "https://a.b/feed").entries
+    assert flickr["author"] == "Duet !"
+    assert len(flickr["title"]) <= 301
+    assert flickr["title"].endswith("…")
+    assert lemmy["author"] == "Crumpled6273"
+
+
+def test_bing_news() -> None:
+    body = _rss(
+        '<item><title>t</title><link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2fsite.example%2fa%3fx%3d1&amp;c=1</link>'
+        "<News:Source>Site</News:Source><News:Image>http://www.bing.com/th?id=ONUT.x&amp;pid=News</News:Image></item>",
+        ns='xmlns:News="https://www.bing.com:443/news/search?q=x&amp;format=rss"',
+    )
+    entry = parse_feed(body, "https://www.bing.com/news/search?q=x&format=rss").entries[0]
+    assert entry["link"] == "https://site.example/a?x=1"
+    assert entry["source"] == "Site"
+    assert entry["image"] == "http://www.bing.com/th?id=ONUT.x&pid=News"
+
+
+def test_podcast_episode_without_page_or_image() -> None:
+    body = _rss(
+        '<item><title>Ep 1</title><guid isPermaLink="false">ep1</guid>'
+        '<enclosure url="https://cdn.a.b/ep1.mp3" length="1" type="audio/mpeg"/></item>',
+        channel='<itunes:image href="https://a.b/show.jpg"/>',
+        ns='xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"',
+    )
+    entry = parse_feed(body, "https://a.b/podcast.xml").entries[0]
+    assert entry["link"] == "https://cdn.a.b/ep1.mp3"
+    assert entry["image"] == "https://a.b/show.jpg"
+
+
+@pytest.mark.parametrize(
+    ("extra", "image"),
+    [
+        # media:content בלי type ובלי סיומת (CDN) הוא תמונה; וידאו לא
+        ('<media:content url="https://cdn.a.b/photo/123"/>', "https://cdn.a.b/photo/123"),
+        ('<media:content url="https://cdn.a.b/clip.mp4"/>', None),
+        ('<media:content url="https://cdn.a.b/v" medium="video"/>', None),
+        ('<itunes:image href="https://a.b/ep.jpg"/>', "https://a.b/ep.jpg"),
+        ("<image><url>https://a.b/item.jpg</url></image>", "https://a.b/item.jpg"),
+        ('<enclosure url="https://a.b/e.png" length="0" type="image/png"/>', "https://a.b/e.png"),
+    ],
+)
+def test_item_image_sources(extra: str, image: str | None) -> None:
+    ns = 'xmlns:media="http://search.yahoo.com/mrss/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"'
+    body = _rss(f"<item><title>t</title><link>https://a.b/1</link>{extra}</item>", ns=ns)
+    assert parse_feed(body, "https://a.b/feed").entries[0]["image"] == image
+
+
+def test_page_with_unknown_charset() -> None:
+    page = b'<html><head><link rel="alternate" type="application/rss+xml; charset=utf-8" href="/rss"></head></html>'
+    with pytest.raises(FeedError) as err:
+        parse_feed(page, "https://a.b/", "text/html", charset="x-bogus")
+    assert err.value.discovered == [("https://a.b/rss", "https://a.b/rss")]
+
+
+def test_glued_attributes_are_repaired() -> None:
+    """WordPress של NASA: בלי רווח בין מאפיינים בתגית השורש, ו-feedparser לא מחזיר כלום."""
+    body = (
+        b'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"\n'
+        b'\txmlns:dc="http://purl.org/dc/elements/1.1/"\n'
+        b'\t xmlns:apod="https://a.b/apod/"xmlns:media="http://search.yahoo.com/mrss/" >\n'
+        b"<channel><title>NASA</title><item><title>Moon</title><link>https://a.b/moon</link></item></channel></rss>"
+    )
+    assert parse_feed(body, "https://a.b/feed").entries[0]["title"] == "Moon"
+
+
+def test_future_dates_use_first_seen() -> None:
+    """שעון מקומי שסומן כ-GMT (jpost, וואלה): תאריך עתידי מוחלף בזמן הראייה הראשון, שנשמר."""
+    now = datetime(2026, 10, 3, 21, 0, tzinfo=UTC)
+    body = _rss(
+        "<item><title>future</title><link>https://a.b/1</link><pubDate>Sun, 04 Oct 2026 00:01:00 GMT</pubDate></item>"
+        "<item><title>close</title><link>https://a.b/2</link><pubDate>Sat, 03 Oct 2026 21:05:00 GMT</pubDate></item>"
+    )
+    seen: dict[str, str] = {}
+    entries = parse_feed(body, "https://a.b/feed").entries
+    apply_first_seen(entries, seen, now)
+    assert entries[0]["published"] == now.isoformat()
+    assert entries[0]["published_estimated"]
+    assert entries[1]["published"] == "2026-10-03T21:05:00+00:00"
+    assert not entries[1]["published_estimated"]
+    again = parse_feed(body, "https://a.b/feed").entries
+    apply_first_seen(again, seen, datetime(2026, 10, 3, 21, 30, tzinfo=UTC))
+    assert again[0]["published"] == now.isoformat()
+
+
+HEB_RSS = '<rss version="2.0"><channel><title>שלום</title><link>https://a.b/</link><item><title>כותרת</title><link>https://a.b/1</link></item></channel></rss>'
+
+
+@pytest.mark.parametrize(
+    ("content", "charset"),
+    [
+        # הקידוד מגיע רק מהשרת
+        (HEB_RSS.encode("cp1255"), "windows-1255"),
+        # ההצהרה במסמך נכונה וברירת המחדל של השרת שגויה
+        (f'<?xml version="1.0" encoding="windows-1255"?>{HEB_RSS}'.encode("cp1255"), "iso-8859-1"),
+        # ההצהרה שגויה (UTF-8) והשרת צודק
+        (f'<?xml version="1.0" encoding="utf-8"?>{HEB_RSS}'.encode("cp1255"), "windows-1255"),
+        # UTF-8 תקין גובר על הצהרה שגויה
+        (f'<?xml version="1.0" encoding="windows-1255"?>{HEB_RSS}'.encode(), None),
+    ],
+)
+def test_encoding(content: bytes, charset: str | None) -> None:
+    result = parse_feed(content, "https://a.b/feed", "text/xml", charset=charset)
+    assert result.info["title"] == "שלום"
+    assert result.entries[0]["title"] == "כותרת"
+
+
+@pytest.mark.parametrize(
+    ("content", "content_type"),
+    [
+        (HEB_RSS.encode(), "text/html"),
+        (HEB_RSS.encode(), "application/json"),
+        (b"\xef\xbb\xbf\n\n" + HEB_RSS.encode(), None),
+        (b"<br />\n<b>Warning</b>: Cannot modify header information<br />\n" + HEB_RSS.encode(), "text/html"),
+        (b"<!-- <html> --><?xml version='1.0'?>" + HEB_RSS.encode(), None),
+    ],
+)
+def test_detects_feed_by_content(content: bytes, content_type: str | None) -> None:
+    assert parse_feed(content, "https://a.b/feed", content_type).entries[0]["title"] == "כותרת"
+
+
+def test_json_feed_with_bom_and_wrong_type() -> None:
+    body = b'\xef\xbb\xbf {"version": "https://jsonfeed.org/version/1.1", "title": "J", "authors": [{"name": "Feed Author"}],'
+    body += b'"items": [{"id": "1", "url": "https://a.b/1", "title": "t"}]}'
+    entry = parse_feed(body, "https://a.b/feed.json", "text/plain").entries[0]
+    assert entry["title"] == "t"
+    assert entry["author"] == "Feed Author"
+
+
+def test_xhtml_page_is_discovered() -> None:
+    page = b'<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>'
+    page += b'<link rel="alternate" type="application/rss+xml" href="/rss"/></head></html>'
+    with pytest.raises(FeedError) as err:
+        parse_feed(page, "https://a.b/", "application/xhtml+xml")
+    assert err.value.discovered == [("https://a.b/rss", "https://a.b/rss")]
+
+
+def test_authors_and_categories() -> None:
+    body = b"""<rss version="2.0"><channel><title>T</title><link>https://a.b/</link>
+    <item><title>1</title><link>https://a.b/1</link><author>bob@a.b (Bob Smith)</author>
+      <category>News</category><category>News</category></item>
+    <item><title>2</title><link>https://a.b/2</link><author>editor@a.b</author></item>
+    </channel></rss>"""
+    first, second = parse_feed(body, "https://a.b/feed").entries
+    assert first["author"] == "Bob Smith"
+    assert first["categories"] == ["News"]
+    assert second["author"] is None
+    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
+    <entry><title>x</title><id>1</id><link href="https://a.b/x"/>
+      <author><name>Ann</name><email>ann@a.b</email></author><author><name>Dan</name></author>
+      <category term="https://a.b/tags/ai" label="AI"/><category term="https://a.b/scheme#"/></entry></feed>"""
+    entry = parse_feed(atom, "https://a.b/atom").entries[0]
+    assert entry["author"] == "Ann, Dan"
+    assert entry["categories"] == ["AI"]
 
 
 def test_find_page_image() -> None:

@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+# הטיפוסים כמו בקוד של Home Assistant למודולים בהקפדה מלאה (strict typing, דרגת Platinum)
+[tool.mypy]
+python_version = "3.14"
+files = ["custom_components/news_card"]
+strict = true
+# ‏HA מייצא מחדש בלי "as", ולכן גם הוא לא מפעיל את הבדיקה הזו
+implicit_reexport = true
+local_partial_types = true
+strict_bytes = true
+warn_unreachable = true
+enable_error_code = ["deprecated", "explicit-override", "ignore-without-code", "redundant-self", "truthy-iterable"]
+
+# ל-feedparser אין טיפוסים (אין py.typed); הוא רק מנתח בתים, ומה שחוזר ממנו מנורמל ל-TypedDict
+[[tool.mypy.overrides]]
+module = ["feedparser", "feedparser.*"]
+ignore_missing_imports = true

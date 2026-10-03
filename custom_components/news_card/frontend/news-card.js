@@ -4,7 +4,7 @@
  * ותומך גם בישויות event של Feedreader (הכתבה האחרונה בלבד).
  */
 
-const CARD_VERSION = "1.6.1";
+const CARD_VERSION = "1.7.0";
 const DOMAIN = "news_card";
 const READ_KEY = "news-card:read";
 const READ_LIMIT = 500;
@@ -22,6 +22,12 @@ const STRINGS = {
     unavailable: "{entity} is unavailable.",
     stale: "Outdated",
     stale_tip: "The feed isn't updating. Last successful update: {time}",
+    why_blocked: "The site blocks feed readers.",
+    why_refused: "The site refused. A different User-Agent in the feed options may help.",
+    why_not_found: "The feed isn't at its address anymore.",
+    why_rate_limited: "The site asked to slow down; we'll try again later.",
+    why_server_error: "The site is having trouble.",
+    why_auth_required: "The feed needs a login.",
     open_article: "Open article",
     close: "Close",
     no_feeds_hint: "Add a feed in Settings → Devices & services → News Card.",
@@ -77,6 +83,12 @@ const STRINGS = {
     unavailable: "{entity} לא זמינה.",
     stale: "לא עדכני",
     stale_tip: "הפיד לא מתעדכן. עדכון אחרון שהצליח: {time}",
+    why_blocked: "האתר חוסם קוראי פידים.",
+    why_refused: "האתר סירב. User-Agent אחר בהגדרות הפיד יכול לעזור.",
+    why_not_found: "הפיד כבר לא בכתובת שלו.",
+    why_rate_limited: "האתר ביקש להאט, ננסה שוב בהמשך.",
+    why_server_error: "יש תקלה באתר.",
+    why_auth_required: "הפיד דורש כניסה.",
     open_article: "לכתבה המלאה",
     close: "סגירה",
     no_feeds_hint: "אפשר להוסיף פיד בהגדרות ← מכשירים ושירותים ← News Card.",
@@ -607,7 +619,8 @@ class NewsCard extends HTMLElement {
       const units = [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]];
       const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
       for (const [unit, sec] of units) {
-        if (Math.abs(diff) >= sec) return rtf.format(Math.round(diff / sec), unit);
+        // ‏ICU בעברית מוסיף מספר בסוגריים ("לפני שעתיים (2)"); הוא מיותר
+        if (Math.abs(diff) >= sec) return rtf.format(Math.round(diff / sec), unit).replace(/\s*\(\d+\)/, "");
       }
       return rtf.format(0, "minute");
     }
@@ -649,7 +662,11 @@ class NewsCard extends HTMLElement {
     const problems = this._problems(lang);
     const staleFeeds = this._ids().map((id) => this._feeds[id]).filter((f) => f?.stale);
     const staleChip = staleFeeds.length
-      ? `<span class="chip" title="${esc(t(lang, "stale_tip", { time: this._formatAbsolute(staleFeeds[0].last_success) }))}">${esc(t(lang, "stale"))}</span>`
+      ? `<span class="chip" title="${esc(
+          [t(lang, "stale_tip", { time: this._formatAbsolute(staleFeeds[0].last_success) }), STRINGS[lang][`why_${staleFeeds[0].error}`]]
+            .filter(Boolean)
+            .join(" "),
+        )}">${esc(t(lang, "stale"))}</span>`
       : "";
 
     let body;

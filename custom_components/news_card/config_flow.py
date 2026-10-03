@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-from urllib.parse import urlparse, urlunparse
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any, override
+from urllib.parse import urljoin, urlparse, urlunparse
 
-import voluptuous as vol
+import probatio as vol
 
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -39,7 +41,15 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import slugify
 
 from .alerts import default_tts_engine
-from .client import FetchError, async_fetch
+from .client import (
+    FALLBACK_REASONS,
+    USER_AGENT_BROWSER,
+    FetchError,
+    FetchResult,
+    async_fetch,
+    resolve_user_agent,
+    valid_user_agent,
+)
 from .const import (
     ALERT_MODE_DAILY,
     ALERT_MODE_NEW,
@@ -60,16 +70,20 @@ from .const import (
     CONF_PROXY_IMAGES,
     CONF_SCAN_INTERVAL,
     CONF_URL,
+    CONF_USER_AGENT,
     CONF_VERIFY_SSL,
     DEFAULT_OPTIONS,
     DOMAIN,
     FEED_MAX_BYTES,
+    FETCH_TIMEOUT,
     MAX_ENTRIES_LIMIT,
     SUBENTRY_ALERT,
 )
 from .feed import FeedError, parse_feed
 
 FEEDREADER_DOMAIN = "feedreader"
+COMMON_FEED_PATHS = ("feed", "rss", "feed.xml", "rss.xml", "atom.xml", "index.xml", "feed.json")
+PROBE_TIMEOUT = 10
 
 
 class FeedValidationError(Exception):
@@ -92,23 +106,89 @@ def normalize_url(url: str) -> str:
     return urlunparse((parts.scheme.lower(), parts.netloc.lower(), path, parts.params, parts.query, ""))
 
 
-async def async_validate_feed(hass: HomeAssistant, url: str, verify_ssl: bool = True) -> tuple[str, str]:
-    """מוריד ומנתח. מחזיר (כתובת סופית, כותרת הפיד)."""
+type Fetch = Callable[..., Awaitable[FetchResult]]
+
+
+def _fetcher(session: Any, user_agent: str | None) -> Fetch:
+    """הורדה כמו במתאם: קודם רגילה, ורק אם האתר מסרב, שוב עם ה-User-Agent מההגדרות."""
+    fallback = resolve_user_agent(user_agent)
+
+    async def fetch(url: str, **kwargs: Any) -> FetchResult:
+        try:
+            return await async_fetch(session, url, **kwargs)
+        except FetchError as err:
+            if not fallback or err.reason not in FALLBACK_REASONS:
+                raise
+        return await async_fetch(session, url, user_agent=fallback, **kwargs)
+
+    return fetch
+
+
+async def _async_check_feed(hass: HomeAssistant, fetch: Fetch, url: str, timeout: float = FETCH_TIMEOUT) -> tuple[str, str]:
+    """מוריד ומנתח. מחזיר (כתובת סופית, כותרת). זורק FetchError / FeedError."""
+    result = await fetch(url, max_bytes=FEED_MAX_BYTES, timeout=timeout, truncate=True)
+    parsed = await hass.async_add_executor_job(
+        parse_feed, result.content or b"", result.url, result.content_type, 1, result.charset
+    )
+    return result.url, parsed.info["title"]
+
+
+async def _async_probe_paths(hass: HomeAssistant, fetch: Fetch, page_url: str) -> list[tuple[str, str]]:
+    """פידים בנתיבים המקובלים (WordPress, Ghost, Hugo, Jekyll), לאתר שלא מצהיר על פיד בדף."""
+    parts = urlparse(page_url)
+    bases = dict.fromkeys((urljoin(page_url, "."), f"{parts.scheme}://{parts.netloc}/"))
+    candidates = dict.fromkeys(urljoin(base, path) for base in bases for path in COMMON_FEED_PATHS)
+
+    async def check(url: str) -> tuple[str, str] | None:
+        try:
+            return await _async_check_feed(hass, fetch, url, PROBE_TIMEOUT)
+        except (FetchError, FeedError):
+            return None
+
+    hits: dict[str, str] = {}
+    for hit in await asyncio.gather(*(check(url) for url in candidates)):
+        if hit:
+            hits.setdefault(*hit)
+    return list(hits.items())
+
+
+async def async_validate_feed(
+    hass: HomeAssistant, url: str, verify_ssl: bool = True, probe: bool = True, user_agent: str | None = None
+) -> tuple[str, str]:
+    """מוריד ומנתח. מחזיר (כתובת סופית, כותרת הפיד).
+
+    דף אתר בלי פיד מוצהר: הקישורים בדף שנראים כמו פיד, ועם probe גם פידים בנתיבים מקובלים באתר.
+    """
     parts = urlparse(url if "://" in url else f"https://{url}")
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise FeedValidationError("invalid_url")
     url = parts.geturl()
-    session = async_get_clientsession(hass, verify_ssl=verify_ssl)
+    fetch = _fetcher(async_get_clientsession(hass, verify_ssl=verify_ssl), user_agent)
     try:
-        result = await async_fetch(session, url, max_bytes=FEED_MAX_BYTES)
-        parsed = await hass.async_add_executor_job(
-            parse_feed, result.content or b"", result.url, result.content_type
-        )
+        return await _async_check_feed(hass, fetch, url)
     except FetchError as err:
-        raise FeedValidationError(err.reason, status=err.status) from err
+        found = []
+        if probe and err.reason == "not_found":
+            # פיד שעבר כתובת: מחפשים את הפידים הנוכחיים בדף הבית של האתר
+            home = f"{parts.scheme}://{parts.netloc}/"
+            try:
+                found = [await _async_check_feed(hass, fetch, home)]
+            except FetchError:
+                pass
+            except FeedError as page:
+                # האתר עוד מצהיר לפעמים על הכתובת השבורה
+                found = [f for f in await _async_found(hass, fetch, home, page, probe) if f[0] != url]
+        raise FeedValidationError(err.reason, found, err.status) from err
     except FeedError as err:
-        raise FeedValidationError(err.reason, err.discovered) from err
-    return result.url, parsed.info["title"]
+        raise FeedValidationError(err.reason, await _async_found(hass, fetch, url, err, probe)) from err
+
+
+async def _async_found(hass: HomeAssistant, fetch: Fetch, url: str, err: FeedError, probe: bool) -> list[tuple[str, str]]:
+    """הפידים שמוצעים לדף שאינו פיד: המוצהרים, ואם אין, נתיבים מקובלים וקישורים בדף."""
+    if not probe or err.reason != "not_a_feed" or err.discovered:
+        return err.discovered or err.links
+    probed = await _async_probe_paths(hass, fetch, url)
+    return probed + [link for link in err.links if link[0] not in dict(probed)]
 
 
 def _feedreader_urls(hass: HomeAssistant) -> list[str]:
@@ -130,6 +210,15 @@ def _url_selector(hass: HomeAssistant) -> Any:
     return TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
 
 
+def user_agent_selector() -> SelectSelector:
+    """דפדפן מהרשימה, או כל טקסט אחר. נשלח רק כשהבקשה הרגילה נדחית."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[USER_AGENT_BROWSER], custom_value=True, mode=SelectSelectorMode.DROPDOWN, translation_key=CONF_USER_AGENT
+        )
+    )
+
+
 def _error_placeholders(err: FeedValidationError) -> dict[str, str]:
     return {"status": str(err.status or "")}
 
@@ -142,19 +231,27 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._discovered: list[tuple[str, str]] = []
         self._verify_ssl = True
+        self._user_agent = ""
+        self._url = ""
+        self._status = ""
 
+    @override
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         placeholders: dict[str, str] = {"status": ""}
         example = {"example": "https://www.example.com/feed"}
         if user_input is not None:
             self._verify_ssl = user_input.get(CONF_VERIFY_SSL, True)
+            self._user_agent = ""
             try:
                 return await self._async_create(user_input[CONF_URL])
             except FeedValidationError as err:
                 if err.discovered:
-                    self._discovered = err.discovered
-                    return await self.async_step_discovery()
+                    return await self._async_show_found(err)
+                if err.reason in FALLBACK_REASONS:
+                    # האתר מסרב לקורא פידים; מציעים לנסות עם User-Agent אחר
+                    self._url, self._status = user_input[CONF_URL], str(err.status or "")
+                    return await self.async_step_user_agent()
                 errors["base"] = err.reason
                 placeholders = _error_placeholders(err)
         placeholders |= example
@@ -172,23 +269,65 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders=placeholders,
         )
 
-    async def async_step_discovery(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """הכתובת היא דף אתר: בחירה מתוך הפידים שהוא מצהיר עליהם."""
+    async def _async_show_found(self, err: FeedValidationError) -> ConfigFlowResult:
+        self._discovered = err.discovered
+        return await (self.async_step_moved() if err.reason == "not_found" else self.async_step_select_feed())
+
+    async def async_step_user_agent(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """האתר סירב: ניסיון חוזר עם User-Agent של דפדפן או אחר, שיישמר בהגדרות הפיד."""
+        errors: dict[str, str] = {}
+        placeholders = {"host": urlparse(normalize_url(self._url)).netloc, "status": self._status}
+        if user_input is not None:
+            option = (user_input.get(CONF_USER_AGENT) or "").strip()
+            if not option or not valid_user_agent(option):
+                errors[CONF_USER_AGENT] = "invalid_user_agent"
+            else:
+                self._user_agent = option
+                try:
+                    return await self._async_create(self._url)
+                except FeedValidationError as err:
+                    if err.discovered:
+                        return await self._async_show_found(err)
+                    errors["base"] = "still_refused" if err.reason in (*FALLBACK_REASONS, "blocked") else err.reason
+                    placeholders["status"] = str(err.status or "")
+        return self.async_show_form(
+            step_id="user_agent",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema({vol.Required(CONF_USER_AGENT): user_agent_selector()}),
+                user_input or {CONF_USER_AGENT: self._user_agent or USER_AGENT_BROWSER},
+            ),
+            errors=errors,
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_moved(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """הפיד לא קיים יותר בכתובת: בחירה מתוך הפידים שנמצאו בדף הבית."""
+        return await self.async_step_select_feed(user_input, "moved")
+
+    async def async_step_select_feed(
+        self, user_input: dict[str, Any] | None = None, step_id: str = "select_feed"
+    ) -> ConfigFlowResult:
+        """הכתובת היא דף אתר: בחירה מתוך הפידים שנמצאו בו ובאתר."""
         errors: dict[str, str] = {}
         placeholders: dict[str, str] = {"status": ""}
         if user_input is not None:
             try:
-                return await self._async_create(user_input[CONF_URL])
+                return await self._async_create(user_input[CONF_URL], probe=False)
             except FeedValidationError as err:
-                errors["base"] = err.reason
-                placeholders = _error_placeholders(err)
+                if err.discovered:
+                    # נבחר דף אינדקס של פידים (למשל "RSS" באתר חדשות): מציגים את הפידים שבו
+                    self._discovered = err.discovered
+                else:
+                    errors["base"] = err.reason
+                    placeholders = _error_placeholders(err)
         options = [SelectOptionDict(value=url, label=f"{title} — {url}" if title != url else url) for url, title in self._discovered]
+        mode = SelectSelectorMode.LIST if len(options) <= 10 else SelectSelectorMode.DROPDOWN
         return self.async_show_form(
-            step_id="discovery",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_URL, default=self._discovered[0][0]): SelectSelector(
-                        SelectSelectorConfig(options=options, mode=SelectSelectorMode.LIST)
+                        SelectSelectorConfig(options=options, mode=mode)
                     )
                 }
             ),
@@ -196,17 +335,17 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders=placeholders,
         )
 
-    async def _async_create(self, url: str) -> ConfigFlowResult:
+    async def _async_create(self, url: str, probe: bool = True) -> ConfigFlowResult:
         await self.async_set_unique_id(normalize_url(url))
         self._abort_if_unique_id_configured()
-        final_url, title = await async_validate_feed(self.hass, url, self._verify_ssl)
+        final_url, title = await async_validate_feed(self.hass, url, self._verify_ssl, probe, self._user_agent)
         if normalize_url(final_url) != self.unique_id:
             await self.async_set_unique_id(normalize_url(final_url))
             self._abort_if_unique_id_configured()
         return self.async_create_entry(
             title=title,
             data={CONF_URL: final_url},
-            options={**DEFAULT_OPTIONS, CONF_VERIFY_SSL: self._verify_ssl},
+            options={**DEFAULT_OPTIONS, CONF_VERIFY_SSL: self._verify_ssl, CONF_USER_AGENT: self._user_agent},
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -217,9 +356,11 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             verify = entry.options.get(CONF_VERIFY_SSL, True)
             try:
-                final_url, _ = await async_validate_feed(self.hass, user_input[CONF_URL], verify)
+                final_url, _ = await async_validate_feed(
+                    self.hass, user_input[CONF_URL], verify, probe=False, user_agent=entry.options.get(CONF_USER_AGENT)
+                )
             except FeedValidationError as err:
-                errors["base"] = "not_a_feed" if err.discovered else err.reason
+                errors["base"] = err.reason
                 placeholders = _error_placeholders(err)
             else:
                 unique_id = normalize_url(final_url)
@@ -228,9 +369,8 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
                     for e in self._async_current_entries(include_ignore=False)
                 ):
                     return self.async_abort(reason="already_configured")
-                return self.async_update_reload_and_abort(
-                    entry, unique_id=unique_id, data_updates={CONF_URL: final_url}
-                )
+                # מאזין העדכונים של הרשומה טוען אותה מחדש
+                return self.async_update_and_abort(entry, unique_id=unique_id, data_updates={CONF_URL: final_url})
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
@@ -240,11 +380,13 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders=placeholders,
         )
 
+    @override
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: Any) -> NewsCardOptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> NewsCardOptionsFlow:
         return NewsCardOptionsFlow()
 
+    @override
     @classmethod
     @callback
     def async_get_supported_subentry_types(cls, config_entry: ConfigEntry) -> dict[str, type[ConfigSubentryFlow]]:
@@ -255,16 +397,22 @@ class NewsCardOptionsFlow(OptionsFlow):
     """אפשרויות פיד."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                data={
-                    **user_input,
-                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
-                    CONF_MAX_ENTRIES: int(user_input[CONF_MAX_ENTRIES]),
-                    CONF_KEYWORDS: user_input.get(CONF_KEYWORDS, ""),
-                }
-            )
-        current = {**DEFAULT_OPTIONS, **self.config_entry.options}
+            # שדה שנוקה לא מגיע בכלל
+            user_agent = (user_input.get(CONF_USER_AGENT) or "").strip()
+            if valid_user_agent(user_agent):
+                return self.async_create_entry(
+                    data={
+                        **user_input,
+                        CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                        CONF_MAX_ENTRIES: int(user_input[CONF_MAX_ENTRIES]),
+                        CONF_KEYWORDS: user_input.get(CONF_KEYWORDS, ""),
+                        CONF_USER_AGENT: user_agent,
+                    }
+                )
+            errors[CONF_USER_AGENT] = "invalid_user_agent"
+        current = {**DEFAULT_OPTIONS, **self.config_entry.options, **(user_input or {})}
         schema = vol.Schema(
             {
                 vol.Required(CONF_SCAN_INTERVAL): NumberSelector(
@@ -277,10 +425,11 @@ class NewsCardOptionsFlow(OptionsFlow):
                 vol.Required(CONF_PROXY_IMAGES): BooleanSelector(),
                 vol.Required(CONF_PAGE_IMAGES): BooleanSelector(),
                 vol.Required(CONF_VERIFY_SSL): BooleanSelector(),
+                vol.Optional(CONF_USER_AGENT): user_agent_selector(),
             }
         )
         return self.async_show_form(
-            step_id="init", data_schema=self.add_suggested_values_to_schema(schema, current)
+            step_id="init", data_schema=self.add_suggested_values_to_schema(schema, current), errors=errors
         )
 
 

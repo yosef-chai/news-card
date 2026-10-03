@@ -8,7 +8,7 @@ blueprint:
   author: yosef-chai
   source_url: https://github.com/yosef-chai/news-card/blob/main/blueprints/automation/news_card/speak_new_article.yaml
   homeassistant:
-    min_version: 2026.8.0
+    min_version: 2026.9.0
   input:
     feeds:
       name: News feeds
@@ -86,7 +86,8 @@ conditions:
 variables:
   prefix: !input prefix
   include_summary: !input include_summary
-  article: "{{ trigger.to_state.attributes }}"
+  # מעבר דרך JSON: ב-HA 2026.9 המפתחות של ישות אירוע הם enum, והמאפיינים היו מגיעים כמחרוזת
+  article: "{{ trigger.to_state.attributes | to_json | from_json }}"
 
 actions:
   - action: tts.speak

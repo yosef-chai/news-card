@@ -10,17 +10,30 @@ permissions:
 
 jobs:
   pytest:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # הגרסה המינימלית מ-hacs.json; מעדכנים יחד איתה
+          - name: Home Assistant 2026.9.0
+            harness: pytest-homeassistant-custom-component==0.13.363
+          - name: Home Assistant latest
+            harness: pytest-homeassistant-custom-component
+            latest: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements_test.txt
-      - run: pip install -r requirements_test.txt
+      - run: pip install -r requirements_test.txt "${{ matrix.harness }}"
       - run: pytest --cov=custom_components.news_card --cov-report=term-missing --cov-fail-under=95
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: node --check custom_components/news_card/frontend/news-card.js
+      - name: Strict typing
+        if: matrix.latest
+        run: mypy
+      - name: Card syntax
+        if: matrix.latest
+        run: node --check custom_components/news_card/frontend/news-card.js

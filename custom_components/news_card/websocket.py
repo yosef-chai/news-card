@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-import voluptuous as vol
+import probatio as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.http.auth import async_sign_path

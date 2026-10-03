@@ -12,6 +12,7 @@ CONF_KEYWORDS: Final = "keywords"
 CONF_PROXY_IMAGES: Final = "proxy_images"
 CONF_PAGE_IMAGES: Final = "fetch_page_images"
 CONF_VERIFY_SSL: Final = "verify_ssl"
+CONF_USER_AGENT: Final = "user_agent"
 CONF_WITHIN: Final = "within"
 
 # התראות (תתי-רשומות של פיד)
@@ -42,6 +43,7 @@ DEFAULT_OPTIONS: Final = {
     CONF_PROXY_IMAGES: True,
     CONF_PAGE_IMAGES: True,
     CONF_VERIFY_SSL: True,
+    CONF_USER_AGENT: "",
 }
 
 EVENT_NEW_ARTICLE: Final = "news_card_new_article"
@@ -58,6 +60,8 @@ PAGE_IMAGE_LOOKUPS_PER_REFRESH: Final = 15
 PAGE_IMAGE_ATTEMPTS: Final = 3
 MAX_EVENTS_PER_REFRESH: Final = 20
 FAILURE_ISSUE_AFTER: Final = timedelta(hours=24)
+# אחרי שה-User-Agent החלופי עבד, משתמשים רק בו; פעם ביממה בודקים שוב אם הרגיל כבר מתקבל
+FALLBACK_STICKY: Final = timedelta(hours=24)
 SIGNED_PATH_TTL: Final = timedelta(days=1)
 
 STATIC_URL: Final = "/news_card/frontend"

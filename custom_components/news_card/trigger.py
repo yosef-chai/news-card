@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, override
+from typing import Any, cast, override
+
+import probatio as vol
 
 from homeassistant.components.event import ATTR_EVENT_TYPE, DOMAIN as EVENT_DOMAIN
 from homeassistant.const import CONF_FOR, CONF_OPTIONS, CONF_TARGET
@@ -26,11 +28,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_KEYWORDS, DOMAIN, EVENT_TYPE_NEW, SIGNAL_UPDATED
 from .coordinator import entry_ids_for_target, loaded_coordinator, match_keywords
-
-try:  # ponytail: HA 2026.10 עבר ל-probatio; הסכמה חייבת להיות באותה ספרייה של cv.TARGET_FIELDS
-    import probatio as vol
-except ImportError:
-    import voluptuous as vol  # type: ignore[no-redef]
 
 OPTIONS_SCHEMA = vol.Schema({vol.Optional(CONF_KEYWORDS, default=[]): vol.All(cv.ensure_list, [cv.string])})
 
@@ -91,8 +88,8 @@ class NoNewArticlesTrigger(Trigger):
 
     @override
     @classmethod
-    async def async_validate_config(cls, hass: HomeAssistant, config: dict[str, Any]) -> dict[str, Any]:
-        return NO_NEW_ARTICLES_SCHEMA(config)
+    async def async_validate_config(cls, hass: HomeAssistant, config: ConfigType) -> ConfigType:
+        return cast(ConfigType, NO_NEW_ARTICLES_SCHEMA(config))
 
     def __init__(self, hass: HomeAssistant, config: TriggerConfig) -> None:
         super().__init__(hass, config)

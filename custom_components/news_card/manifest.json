@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/yosef-chai/news-card/issues",
   "loggers": ["feedparser", "sgmllib3k"],
   "requirements": ["feedparser>=6.0.12"],
-  "version": "1.6.1"
+  "version": "1.7.0"
 }
