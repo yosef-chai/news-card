@@ -205,7 +205,8 @@
           "server_error": "יש תקלה באתר ({status}). אפשר לנסות שוב מאוחר יותר.",
           "refused": "האתר סירב לבקשה ({status}). אפשר לנסות User-Agent אחר בהגדרות הפיד.",
           "still_refused": "האתר עדיין מסרב ({status}), גם עם ה-User-Agent מהגדרות הפיד.",
-          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים."
+          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים.",
+          "already_configured": "הכתובת הזו שייכת לפיד אחר שכבר מוגדר אצלך."
         },
         "abort": {
           "entry_removed": "הפיד הוסר."
@@ -243,7 +244,8 @@
           "server_error": "יש תקלה באתר ({status}). אפשר לנסות שוב מאוחר יותר.",
           "refused": "האתר סירב לבקשה ({status}). אפשר לנסות User-Agent אחר בהגדרות הפיד.",
           "still_refused": "האתר עדיין מסרב ({status}), גם עם ה-User-Agent מהגדרות הפיד.",
-          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים."
+          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים.",
+          "already_configured": "הכתובת הזו שייכת לפיד אחר שכבר מוגדר אצלך."
         },
         "abort": {
           "entry_removed": "הפיד הוסר."
@@ -283,7 +285,8 @@
           "server_error": "יש תקלה באתר ({status}). אפשר לנסות שוב מאוחר יותר.",
           "refused": "האתר סירב לבקשה ({status}). אפשר לבחור User-Agent ולנסות שוב.",
           "still_refused": "האתר עדיין מסרב ({status}). אפשר לנסות User-Agent אחר. אם שום דבר לא עובד, האתר מכניס רק דפדפנים אמיתיים.",
-          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים."
+          "invalid_user_agent": "User-Agent הוא שורה אחת, עד 512 תווים.",
+          "already_configured": "הכתובת הזו שייכת לפיד אחר שכבר מוגדר אצלך."
         },
         "abort": {
           "entry_removed": "הפיד הוסר."

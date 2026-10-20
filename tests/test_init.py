@@ -2,15 +2,25 @@
 
 from datetime import timedelta
 from http import HTTPStatus
+import json
+from pathlib import Path
+import re
+from typing import Any
+from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
+from homeassistant.components.recorder import Recorder
+from homeassistant.components.recorder.history import get_significant_states
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -18,15 +28,36 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
 )
-from pytest_homeassistant_custom_component.components.diagnostics import get_diagnostics_for_config_entry
+from pytest_homeassistant_custom_component.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+)
+from pytest_homeassistant_custom_component.components.recorder.common import (
+    async_wait_recording_done,
+)
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
-from custom_components.news_card.client import BROWSER_USER_AGENT, USER_AGENT
-from custom_components.news_card.const import DEFAULT_OPTIONS, DOMAIN, EVENT_NEW_ARTICLE
+from custom_components.news_card.client import (
+    BROWSER_USER_AGENT,
+    USER_AGENT,
+    async_fetch,
+)
+from custom_components.news_card.const import (
+    DEFAULT_OPTIONS,
+    DOMAIN,
+    EVENT_NEW_ARTICLE,
+    PAGE_MAX_BYTES,
+)
 from custom_components.news_card.diagnostics import redact_url
 from custom_components.news_card.feed import make_id
 
-from .conftest import FEED_URL, RSS, fixture, refuse_default_user_agent, rss, user_agents
+from .conftest import (
+    FEED_URL,
+    RSS,
+    fixture,
+    refuse_default_user_agent,
+    rss,
+    user_agents,
+)
 
 SENSOR = "sensor.jdn_latest_article"
 EVENT = "event.jdn_new_article"
@@ -49,6 +80,7 @@ async def _refresh(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
 
 
 async def test_setup_and_entities(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
+    """הקמה יוצרת את החיישנים עם נתוני הכתבה האחרונה, בלי אירוע ראשוני."""
     assert loaded.state is ConfigEntryState.LOADED
     state = hass.states.get(SENSOR)
     assert state.state.startswith("מאחורי הקלעים")
@@ -61,12 +93,16 @@ async def test_setup_and_entities(hass: HomeAssistant, loaded: MockConfigEntry) 
 
 
 async def test_unload_and_remove(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
+    """הרשומה נפרקת ונמחקת."""
     assert await hass.config_entries.async_unload(loaded.entry_id)
     assert loaded.state is ConfigEntryState.NOT_LOADED
     await hass.config_entries.async_remove(loaded.entry_id)
 
 
-async def test_setup_retry_on_failure(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry) -> None:
+async def test_setup_retry_on_failure(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry
+) -> None:
+    """פיד שלא עונה בהקמה הראשונה גורם לניסיון חוזר."""
     aioclient_mock.get(FEED_URL, status=503)
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
@@ -74,16 +110,25 @@ async def test_setup_retry_on_failure(hass: HomeAssistant, aioclient_mock: Aioht
 
 
 async def test_new_articles_fire_events_once(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """כתבה חדשה מוכרזת פעם אחת באירוע ובישות האירוע, כולל התאמה למילת מפתח."""
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "keywords": "Item b"})
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "keywords": "Item b"}
+    )
     aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
     states: list = []
-    hass.bus.async_listen("state_changed", lambda e: e.data["entity_id"] == EVENT and states.append(e.data["new_state"]))
+    hass.bus.async_listen(
+        "state_changed",
+        lambda e: e.data["entity_id"] == EVENT and states.append(e.data["new_state"]),
+    )
 
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, content=rss([("b", D2), ("a", D1)]))
@@ -101,8 +146,12 @@ async def test_new_articles_fire_events_once(
 
 
 async def test_new_article_trigger(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """הטריגר נורה לכל כתבה חדשה לפי ישות או מכשיר, ומסנן לפי מילות מפתח."""
     entry.add_to_hass(hass)
     aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -113,53 +162,82 @@ async def test_new_article_trigger(
     def auto(alias: str, target: dict, options: dict) -> dict:
         return {
             "alias": alias,
-            "triggers": {"trigger": "news_card.new_article", "target": target, "options": options},
-            "actions": {"action": "test.automation", "data": {"alias": alias, "title": "{{ trigger.to_state.attributes.title }}"}},
+            "triggers": {
+                "trigger": "news_card.new_article",
+                "target": target,
+                "options": options,
+            },
+            "actions": {
+                "action": "test.automation",
+                "data": {
+                    "alias": alias,
+                    "title": "{{ trigger.to_state.attributes.title }}",
+                },
+            },
         }
 
-    assert await async_setup_component(hass, "automation", {"automation": [
-        auto("all", {"entity_id": EVENT}, {}),
-        auto("word", {"device_id": device.id}, {"keywords": ["  ITEM C ", ""]}),
-        auto("none", {"entity_id": EVENT}, {"keywords": "nothing"}),
-    ]})
+    assert await async_setup_component(
+        hass,
+        "automation",
+        {
+            "automation": [
+                auto("all", {"entity_id": EVENT}, {}),
+                auto("word", {"device_id": device.id}, {"keywords": ["  ITEM C ", ""]}),
+                auto("none", {"entity_id": EVENT}, {"keywords": "nothing"}),
+            ]
+        },
+    )
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, content=rss([("c", D3), ("b", D2), ("a", D1)]))
     await _refresh(hass, freezer)
     assert sorted((c.data["alias"], c.data["title"]) for c in calls) == [
-        ("all", "Item b"), ("all", "Item c"), ("word", "Item c")
+        ("all", "Item b"),
+        ("all", "Item c"),
+        ("word", "Item c"),
     ]
 
 
 async def test_no_events_after_restart(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry
 ) -> None:
+    """טעינה מחדש לא מכריזה שוב על כתבות שכבר נראו."""
     aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
     assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert bus == []
 
 
 async def test_old_entries_from_bigger_cap_not_announced(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """כתבה ישנה שמופיעה פתאום בפיד לא מוכרזת כחדשה."""
     aioclient_mock.get(FEED_URL, content=rss([("c", D3)]))
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
     aioclient_mock.clear_requests()
-    aioclient_mock.get(FEED_URL, content=rss([("c", D3), ("old", "Mon, 01 Jan 2024 00:00:00 +0000")]))
+    aioclient_mock.get(
+        FEED_URL, content=rss([("c", D3), ("old", "Mon, 01 Jan 2024 00:00:00 +0000")])
+    )
     await _refresh(hass, freezer)
     assert bus == []
 
 
 async def test_not_modified_keeps_data(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """תשובת 304 שומרת את הנתונים הקיימים ונחשבת הצלחה."""
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=304)
     await _refresh(hass, freezer)
@@ -168,13 +246,23 @@ async def test_not_modified_keeps_data(
 
 
 async def test_failure_marks_unavailable_and_serves_stale(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """כשל בודד מסמן את החיישן כלא זמין ומגיש את הנתונים הישנים, בלי לפתוח תקלה."""
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=500)
     await _refresh(hass, freezer)
     assert hass.states.get(SENSOR).state == "unavailable"
-    response = await hass.services.async_call(DOMAIN, "get_entries", {"entity_id": SENSOR}, blocking=True, return_response=True)
+    response = await hass.services.async_call(
+        DOMAIN,
+        "get_entries",
+        {"entity_id": SENSOR},
+        blocking=True,
+        return_response=True,
+    )
     assert response[SENSOR]["stale"] is True
     assert len(response[SENSOR]["entries"]) == 8
     issues = ir.async_get(hass)
@@ -182,21 +270,30 @@ async def test_failure_marks_unavailable_and_serves_stale(
 
 
 async def test_repair_issue_on_404_and_cleared(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """פיד שמחזיר 404 פותח תקלה, והיא נסגרת כשהפיד חוזר."""
     issue_id = f"feed_unreachable_{loaded.entry_id}"
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=404)
     await _refresh(hass, freezer)
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
     aioclient_mock.clear_requests()
-    aioclient_mock.get(FEED_URL, content=fixture("jdn.xml"), headers={"Content-Type": RSS})
+    aioclient_mock.get(
+        FEED_URL, content=fixture("jdn.xml"), headers={"Content-Type": RSS}
+    )
     await _refresh(hass, freezer)
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_blocked_site_backs_off(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """חסימת בוטים מוצגת מיד כתקלה מוסברת, וכל כשל רצוף מאט את הניסיונות."""
     coordinator = loaded.runtime_data
@@ -222,19 +319,28 @@ async def test_blocked_site_backs_off(
     assert coordinator.update_interval == timedelta(hours=2)
 
     aioclient_mock.clear_requests()
-    aioclient_mock.get(FEED_URL, content=fixture("jdn.xml"), headers={"Content-Type": RSS})
+    aioclient_mock.get(
+        FEED_URL, content=fixture("jdn.xml"), headers={"Content-Type": RSS}
+    )
     await _refresh(hass, freezer)
     assert coordinator.update_interval == timedelta(minutes=15)
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
-async def _use_user_agent(hass: HomeAssistant, entry: MockConfigEntry, user_agent: str) -> None:
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "user_agent": user_agent})
+async def _use_user_agent(
+    hass: HomeAssistant, entry: MockConfigEntry, user_agent: str
+) -> None:
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "user_agent": user_agent}
+    )
     await hass.async_block_till_done()  # מאזין העדכון טוען את הרשומה מחדש
 
 
 async def test_user_agent_fallback(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
     """ה-User-Agent מההגדרות נשלח רק אחרי סירוב, נשאר ליממה, ואז בודקים שוב את הרגיל."""
     await _use_user_agent(hass, loaded, "browser")
@@ -247,7 +353,11 @@ async def test_user_agent_fallback(
     assert coordinator.fallback_active
 
     await _refresh(hass, freezer)  # ישר עם החלופי, בלי בקשה כפולה
-    assert user_agents(aioclient_mock) == [USER_AGENT, BROWSER_USER_AGENT, BROWSER_USER_AGENT]
+    assert user_agents(aioclient_mock) == [
+        USER_AGENT,
+        BROWSER_USER_AGENT,
+        BROWSER_USER_AGENT,
+    ]
 
     freezer.tick(timedelta(hours=24))
     await _refresh(hass, freezer)  # אחרי יממה מנסים שוב את הרגיל
@@ -259,16 +369,26 @@ async def test_user_agent_fallback(
     await _refresh(hass, freezer)
     assert coordinator.last_error == "refused"
     assert not coordinator.fallback_active
-    issue = ir.async_get(hass).async_get_issue(DOMAIN, f"feed_unreachable_{loaded.entry_id}")
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"feed_unreachable_{loaded.entry_id}"
+    )
     assert issue.translation_key == "feed_refused"
     assert issue.data["reason"] == "refused"
     await _refresh(hass, freezer)
-    assert user_agents(aioclient_mock) == [BROWSER_USER_AGENT, USER_AGENT, BROWSER_USER_AGENT]
+    assert user_agents(aioclient_mock) == [
+        BROWSER_USER_AGENT,
+        USER_AGENT,
+        BROWSER_USER_AGENT,
+    ]
 
 
 async def test_no_fallback_without_user_agent_or_for_challenge(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """בלי User-Agent בהגדרות, או מול אתגר JavaScript, אין ניסיון נוסף."""
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=403)
     await _refresh(hass, freezer)
@@ -277,18 +397,28 @@ async def test_no_fallback_without_user_agent_or_for_challenge(
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=403, headers={"cf-mitigated": "challenge"})
     await _refresh(hass, freezer)
-    assert user_agents(aioclient_mock) == [USER_AGENT]  # אתגר JavaScript: User-Agent אחר לא יעזור
+    assert user_agents(aioclient_mock) == [
+        USER_AGENT
+    ]  # אתגר JavaScript: User-Agent אחר לא יעזור
 
 
 async def test_refused_repair_flow_sets_user_agent(
-    hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """תיקון לאתר שמסרב בודק את ה-User-Agent ושומר אותו רק כשהוא עובד."""
     assert await async_setup_component(hass, "repairs", {})
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=406)
     await _refresh(hass, freezer)
     client = await hass_client()
-    resp = await client.post("/api/repairs/issues/fix", json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"})
+    resp = await client.post(
+        "/api/repairs/issues/fix",
+        json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"},
+    )
     flow = await resp.json()
     assert [f["name"] for f in flow["data_schema"]] == ["url", "user_agent"]
     url = f"/api/repairs/issues/fix/{flow['flow_id']}"
@@ -304,19 +434,30 @@ async def test_refused_repair_flow_sets_user_agent(
 
 
 async def test_repair_issue_after_long_failure(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """כשל שנמשך יותר מיממה פותח תקלה."""
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, content=b"garbage")
     await _refresh(hass, freezer)
     freezer.tick(timedelta(hours=25))
     await _refresh(hass, freezer)
-    assert ir.async_get(hass).async_get_issue(DOMAIN, f"feed_unreachable_{loaded.entry_id}")
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, f"feed_unreachable_{loaded.entry_id}"
+    )
 
 
 async def test_repair_flow(
-    hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """תיקון לפיד שנעלם בודק את הכתובת החדשה ומעדכן את הרשומה."""
     assert await async_setup_component(hass, "repairs", {})
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=410)
@@ -324,19 +465,38 @@ async def test_repair_flow(
     new = "https://www.emess.co.il/feed"
     aioclient_mock.get(new, content=fixture("emess.xml"), headers={"Content-Type": RSS})
     client = await hass_client()
-    resp = await client.post("/api/repairs/issues/fix", json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"})
+    resp = await client.post(
+        "/api/repairs/issues/fix",
+        json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"},
+    )
     flow = await resp.json()
     assert flow["step_id"] == "url"
     aioclient_mock.get("https://www.jdn.co.il/", status=404)
-    resp = await client.post(f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": FEED_URL})
+    resp = await client.post(
+        f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": FEED_URL}
+    )
     assert (await resp.json())["errors"] == {"base": "not_found"}
-    resp = await client.post(f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": new})
+    resp = await client.post(
+        f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": new}
+    )
     assert (await resp.json())["type"] == "create_entry"
     assert loaded.data["url"] == new
 
 
-async def test_get_entries_filters(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
-    call = lambda data: hass.services.async_call(DOMAIN, "get_entries", {"entity_id": SENSOR, **data}, blocking=True, return_response=True)  # noqa: E731
+async def test_get_entries_filters(
+    hass: HomeAssistant, loaded: MockConfigEntry
+) -> None:
+    """get_entries מסנן לפי מספר, מילת מפתח ותאריך."""
+
+    async def call(data: dict[str, Any]) -> Any:
+        return await hass.services.async_call(
+            DOMAIN,
+            "get_entries",
+            {"entity_id": SENSOR, **data},
+            blocking=True,
+            return_response=True,
+        )
+
     assert len((await call({"limit": 2}))[SENSOR]["entries"]) == 2
     assert len((await call({"keyword": "zzzz-none"}))[SENSOR]["entries"]) == 0
     assert (await call({"since": "2030-01-01 00:00:00"}))[SENSOR]["entries"] == []
@@ -346,43 +506,101 @@ async def test_get_entries_filters(hass: HomeAssistant, loaded: MockConfigEntry)
 
 
 async def test_service_errors(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
+    """פעולה על ישות לא קיימת או על פיד שנפרק נכשלת בשגיאת אימות."""
     with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(DOMAIN, "get_entries", {"entity_id": "sensor.nope"}, blocking=True, return_response=True)
+        await hass.services.async_call(
+            DOMAIN,
+            "get_entries",
+            {"entity_id": "sensor.nope"},
+            blocking=True,
+            return_response=True,
+        )
     await hass.config_entries.async_unload(loaded.entry_id)
     with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True)
+        await hass.services.async_call(
+            DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True
+        )
 
 
-async def test_refresh_service(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry) -> None:
+async def test_refresh_service(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry
+) -> None:
+    """פעולת הריענון מורידה את הפיד, וכשל מוחזר למי שהפעיל אותה."""
     calls = aioclient_mock.call_count
-    await hass.services.async_call(DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True)
+    await hass.services.async_call(
+        DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True
+    )
     assert aioclient_mock.call_count == calls + 1
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, status=500)
     with pytest.raises(HomeAssistantError):
-        await hass.services.async_call(DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True)
+        await hass.services.async_call(
+            DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True
+        )
 
 
-async def test_websocket_subscribe(hass: HomeAssistant, hass_ws_client, loaded: MockConfigEntry) -> None:
+async def test_websocket_subscribe(
+    hass: HomeAssistant, hass_ws_client, loaded: MockConfigEntry
+) -> None:
+    """המנוי מחזיר פידים עם קישור פרוקסי חתום, ודוחף רק שינויים."""
     client = await hass_ws_client(hass)
-    await client.send_json({"id": 1, "type": "news_card/subscribe", "entity_ids": [SENSOR, "sensor.missing"]})
+    await client.send_json(
+        {
+            "id": 1,
+            "type": "news_card/subscribe",
+            "entity_ids": [SENSOR, "sensor.missing"],
+        }
+    )
     assert (await client.receive_json())["success"]
     event = (await client.receive_json())["event"]
     feed = event["feeds"][SENSOR]
     assert feed["title"] == "JDN"
-    assert feed["entries"][0]["image_proxy"].startswith(f"/api/news_card/image/{loaded.entry_id}/")
+    assert feed["entries"][0]["image_proxy"].startswith(
+        f"/api/news_card/image/{loaded.entry_id}/"
+    )
     assert "authSig=" in feed["entries"][0]["image_proxy"]
     assert event["feeds"]["sensor.missing"] == {"error": "entity_not_found"}
 
-    # עדכון נדחף לאחר ריענון, וחתימה זהה (מטמון דפדפן)
-    await hass.services.async_call(DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True)
-    again = (await client.receive_json())["event"]["feeds"][SENSOR]
-    assert again["entries"][0]["image_proxy"] == feed["entries"][0]["image_proxy"]
+    # ריענון בלי שינוי לא נדחף; סימון כנקרא כן, עם אותה חתימה (מטמון דפדפן)
+    await hass.services.async_call(
+        DOMAIN, "refresh", {"entity_id": SENSOR}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN, "mark_read", {"entity_id": SENSOR}, blocking=True
+    )
+    again = (await client.receive_json())["event"]["feeds"]
+    assert list(again) == [SENSOR]
+    assert again[SENSOR]["entries"][0]["read"] is True
+    assert (
+        again[SENSOR]["entries"][0]["image_proxy"] == feed["entries"][0]["image_proxy"]
+    )
 
 
-async def test_image_proxy(hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry) -> None:
+async def test_websocket_builds_feed_once(
+    hass: HomeAssistant, hass_ws_client, loaded: MockConfigEntry
+) -> None:
+    """כמה ישויות של אותו פיד מקבלות את אותם נתונים."""
+    client = await hass_ws_client(hass)
+    await client.send_json(
+        {"id": 1, "type": "news_card/subscribe", "entity_ids": [SENSOR, EVENT, SENSOR]}
+    )
+    assert (await client.receive_json())["success"]
+    feeds = (await client.receive_json())["event"]["feeds"]
+    assert set(feeds) == {SENSOR, EVENT}
+    assert feeds[SENSOR] == feeds[EVENT]
+
+
+async def test_image_proxy(
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+) -> None:
+    """הפרוקסי מגיש תמונה ושומר אותה במטמון, ודוחה תמונה או רשומה לא מוכרות."""
     image = loaded.runtime_data.data.entries[0]["image"]
-    aioclient_mock.get(image, content=b"\x89PNGdata", headers={"Content-Type": "image/png"})
+    aioclient_mock.get(
+        image, content=b"\x89PNGdata", headers={"Content-Type": "image/png"}
+    )
     client = await hass_client()
     url = f"/api/news_card/image/{loaded.entry_id}/{make_id(image)}"
     resp = await client.get(url)
@@ -393,51 +611,91 @@ async def test_image_proxy(hass: HomeAssistant, hass_client, aioclient_mock: Aio
     assert resp.status == HTTPStatus.OK
     assert aioclient_mock.call_count == 2  # פיד + תמונה אחת בלבד
 
-    assert (await client.get(f"/api/news_card/image/{loaded.entry_id}/{make_id('https://evil/x')}")).status == HTTPStatus.NOT_FOUND
-    assert (await client.get(f"/api/news_card/image/missing/{make_id(image)}")).status == HTTPStatus.NOT_FOUND
+    assert (
+        await client.get(
+            f"/api/news_card/image/{loaded.entry_id}/{make_id('https://evil/x')}"
+        )
+    ).status == HTTPStatus.NOT_FOUND
+    assert (
+        await client.get(f"/api/news_card/image/missing/{make_id(image)}")
+    ).status == HTTPStatus.NOT_FOUND
 
 
 async def test_image_proxy_rejects_svg_and_errors(
-    hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
 ) -> None:
+    """הפרוקסי דוחה SVG, שגיאות שרת ותמונות גדולות מדי."""
     entries = loaded.runtime_data.data.entries
-    aioclient_mock.get(entries[0]["image"], content=b"<svg/>", headers={"Content-Type": "image/svg+xml"})
+    aioclient_mock.get(
+        entries[0]["image"],
+        content=b"<svg/>",
+        headers={"Content-Type": "image/svg+xml"},
+    )
     aioclient_mock.get(entries[1]["image"], status=500)
-    aioclient_mock.get(entries[2]["image"], content=b"x", headers={"Content-Length": str(20 * 1024 * 1024)})
+    aioclient_mock.get(
+        entries[2]["image"],
+        content=b"x",
+        headers={"Content-Length": str(20 * 1024 * 1024)},
+    )
     client = await hass_client()
     base = f"/api/news_card/image/{loaded.entry_id}/"
-    assert (await client.get(base + make_id(entries[0]["image"]))).status == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
-    assert (await client.get(base + make_id(entries[1]["image"]))).status == HTTPStatus.BAD_GATEWAY
-    assert (await client.get(base + make_id(entries[2]["image"]))).status == HTTPStatus.BAD_GATEWAY
+    assert (
+        await client.get(base + make_id(entries[0]["image"]))
+    ).status == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+    assert (
+        await client.get(base + make_id(entries[1]["image"]))
+    ).status == HTTPStatus.BAD_GATEWAY
+    assert (
+        await client.get(base + make_id(entries[2]["image"]))
+    ).status == HTTPStatus.BAD_GATEWAY
 
 
-async def test_image_proxy_requires_auth(hass: HomeAssistant, hass_client_no_auth, loaded: MockConfigEntry) -> None:
+async def test_image_proxy_requires_auth(
+    hass: HomeAssistant, hass_client_no_auth, loaded: MockConfigEntry
+) -> None:
+    """הפרוקסי דורש הזדהות."""
     client = await hass_client_no_auth()
     image = loaded.runtime_data.data.entries[0]["image"]
     resp = await client.get(f"/api/news_card/image/{loaded.entry_id}/{make_id(image)}")
     assert resp.status == HTTPStatus.UNAUTHORIZED
 
 
-async def test_page_images(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker) -> None:
-    entry = MockConfigEntry(domain=DOMAIN, title="T", data={"url": FEED_URL}, options=DEFAULT_OPTIONS)
+async def test_page_images(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """תמונת הכתבה נלקחת מהדף כשאין בפיד, ודף שנכשל נבדק שוב עד 3 פעמים."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="T", data={"url": FEED_URL}, options=DEFAULT_OPTIONS
+    )
     aioclient_mock.get(FEED_URL, content=rss([("a", D1), ("b", D2)]))
-    aioclient_mock.get("https://example.com/a", text='<meta property="og:image" content="/og-a.jpg">')
+    aioclient_mock.get(
+        "https://example.com/a", text='<meta property="og:image" content="/og-a.jpg">'
+    )
     aioclient_mock.get("https://example.com/b", status=404)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     images = {e["link"]: e["image"] for e in entry.runtime_data.data.entries}
-    assert images == {"https://example.com/a": "https://example.com/og-a.jpg", "https://example.com/b": None}
+    assert images == {
+        "https://example.com/a": "https://example.com/og-a.jpg",
+        "https://example.com/b": None,
+    }
     # דף שנכשל נבדק שוב בריענונים הבאים, עד 3 ניסיונות; דף עם תמונה לא נבדק שוב
     for expected in (2, 2, 1):
         calls = aioclient_mock.call_count
-        await hass.services.async_call(DOMAIN, "refresh", {"entity_id": "sensor.t_latest_article"}, blocking=True)
+        await hass.services.async_call(
+            DOMAIN, "refresh", {"entity_id": "sensor.t_latest_article"}, blocking=True
+        )
         assert aioclient_mock.call_count == calls + expected
 
 
 async def test_cached_data_on_startup_failure(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry
 ) -> None:
+    """כשהאתר לא עונה בהפעלה, הנתונים השמורים נטענים."""
     await hass.config_entries.async_unload(loaded.entry_id)
     aioclient_mock.clear_requests()
     aioclient_mock.get(FEED_URL, exc=TimeoutError())
@@ -447,39 +705,47 @@ async def test_cached_data_on_startup_failure(
     assert not loaded.runtime_data.last_update_success
 
 
-async def test_diagnostics(hass: HomeAssistant, hass_client, loaded: MockConfigEntry) -> None:
+async def test_diagnostics(
+    hass: HomeAssistant, hass_client, loaded: MockConfigEntry
+) -> None:
+    """האבחון מסכם את הפיד ומסתיר פרטי גישה בכתובת."""
     diag = await get_diagnostics_for_config_entry(hass, hass_client, loaded)
     assert diag["url"] == FEED_URL
     assert diag["entry_count"] == 8
     assert diag["entries_with_image"] == 8
     assert len(diag["sample"]) == 3
     # טוקן של פיד פרטי לא יוצא בקובץ האבחון
-    assert redact_url("https://user:secret@example.com:8443/feed?token=abc#x") == "https://example.com:8443/feed?**REDACTED**"
+    assert (
+        redact_url("https://user:secret@example.com:8443/feed?token=abc#x")
+        == "https://example.com:8443/feed?**REDACTED**"
+    )
 
 
-async def test_card_served(hass: HomeAssistant, hass_client, loaded: MockConfigEntry) -> None:
+async def test_card_served(
+    hass: HomeAssistant, hass_client, loaded: MockConfigEntry
+) -> None:
+    """קובץ הכרטיס מוגש, ואי אפשר לצאת מתיקיית frontend."""
     client = await hass_client()
     resp = await client.get("/news_card/frontend/news-card.js")
     assert resp.status == HTTPStatus.OK
     assert "customElements.define" in await resp.text()
-    assert (await client.get("/news_card/frontend/../__init__.py")).status == HTTPStatus.NOT_FOUND
+    assert (
+        await client.get("/news_card/frontend/../__init__.py")
+    ).status == HTTPStatus.NOT_FOUND
 
 
 def test_versions_match() -> None:
-    import json
-    import re
-    from pathlib import Path
-
+    """גרסת הכרטיס זהה לגרסה ב-manifest."""
     root = Path(__file__).parent.parent / "custom_components" / "news_card"
     manifest = json.loads((root / "manifest.json").read_text())["version"]
-    card = re.search(r'CARD_VERSION = "([^"]+)"', (root / "frontend" / "news-card.js").read_text()).group(1)
+    card = re.search(
+        r'CARD_VERSION = "([^"]+)"', (root / "frontend" / "news-card.js").read_text()
+    ).group(1)
     assert manifest == card
 
 
 def test_translations_match() -> None:
-    import json
-    from pathlib import Path
-
+    """בתרגומים יש בדיוק אותם מפתחות כמו ב-strings.json."""
     root = Path(__file__).parent.parent / "custom_components" / "news_card"
 
     def keys(d: dict, prefix: str = "") -> set[str]:
@@ -490,23 +756,39 @@ def test_translations_match() -> None:
 
     strings = keys(json.loads((root / "strings.json").read_text("utf-8")))
     for lang in ("en", "he"):
-        assert keys(json.loads((root / "translations" / f"{lang}.json").read_text("utf-8"))) == strings
-
-
+        assert (
+            keys(
+                json.loads((root / "translations" / f"{lang}.json").read_text("utf-8"))
+            )
+            == strings
+        )
 
 
 async def test_image_proxy_sniffs_octet_stream(
-    hass: HomeAssistant, hass_client, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
 ) -> None:
+    """תמונה שנשלחה כ-octet-stream מזוהה לפי התוכן."""
     image = loaded.runtime_data.data.entries[2]["image"]
-    aioclient_mock.get(image, content=b"\xff\xd8\xffjpegdata", headers={"Content-Type": "application/octet-stream"})
+    aioclient_mock.get(
+        image,
+        content=b"\xff\xd8\xffjpegdata",
+        headers={"Content-Type": "application/octet-stream"},
+    )
     client = await hass_client()
     resp = await client.get(f"/api/news_card/image/{loaded.entry_id}/{make_id(image)}")
     assert resp.status == HTTPStatus.OK
     assert resp.headers["Content-Type"] == "image/jpeg"
 
 
-async def _setup_feed(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, items: list) -> None:
+async def _setup_feed(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    items: list,
+) -> None:
     entry.add_to_hass(hass)
     aioclient_mock.get(FEED_URL, content=rss(items))
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -514,25 +796,46 @@ async def _setup_feed(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, 
 
 
 async def test_mark_read(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, hass_ws_client
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    hass_ws_client,
 ) -> None:
+    """סימון כנקרא מעדכן את המונה ואת הכרטיס, לא מכריז שוב, ונשמר אחרי טעינה."""
     await _setup_feed(hass, aioclient_mock, entry, [("b", D2), ("a", D1)])
     unread = "sensor.jdn_unread_articles"
     assert hass.states.get(unread).state == "2"
     bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
 
-    entries = (await hass.services.async_call(DOMAIN, "get_entries", {"entity_id": SENSOR}, blocking=True, return_response=True))[SENSOR]["entries"]
+    entries = (
+        await hass.services.async_call(
+            DOMAIN,
+            "get_entries",
+            {"entity_id": SENSOR},
+            blocking=True,
+            return_response=True,
+        )
+    )[SENSOR]["entries"]
     assert [e["read"] for e in entries] == [False, False]
-    await hass.services.async_call(DOMAIN, "mark_read", {"entity_id": EVENT, "article_id": entries[0]["id"]}, blocking=True)
+    await hass.services.async_call(
+        DOMAIN,
+        "mark_read",
+        {"entity_id": EVENT, "article_id": entries[0]["id"]},
+        blocking=True,
+    )
     assert hass.states.get(unread).state == "1"
 
     client = await hass_ws_client(hass)
-    await client.send_json_auto_id({"type": "news_card/subscribe", "entity_ids": [SENSOR]})
+    await client.send_json_auto_id(
+        {"type": "news_card/subscribe", "entity_ids": [SENSOR]}
+    )
     assert (await client.receive_json())["success"]
     feed = (await client.receive_json())["event"]["feeds"][SENSOR]
     assert [e["read"] for e in feed["entries"]] == [True, False]
 
-    await hass.services.async_call(DOMAIN, "mark_read", {"entity_id": [SENSOR, unread]}, blocking=True)
+    await hass.services.async_call(
+        DOMAIN, "mark_read", {"entity_id": [SENSOR, unread]}, blocking=True
+    )
     assert hass.states.get(unread).state == "0"
     assert bus == []  # סימון לא מכריז שוב על כתבות
 
@@ -543,8 +846,12 @@ async def test_mark_read(
 
 
 async def test_recent_article_condition(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """התנאי בודק אם יש כתבה בטווח הזמן, עם מילות מפתח או בלי."""
     freezer.move_to("2026-10-01 10:30:00+00:00")
     await _setup_feed(hass, aioclient_mock, entry, [("c", D3), ("b", D2), ("a", D1)])
     device = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)[0]
@@ -554,36 +861,79 @@ async def test_recent_article_condition(
         return {
             "alias": alias,
             "triggers": {"trigger": "event", "event_type": "test_event"},
-            "conditions": {"condition": "news_card.recent_article", "target": target, "options": options},
+            "conditions": {
+                "condition": "news_card.recent_article",
+                "target": target,
+                "options": options,
+            },
             "actions": {"action": "test.automation", "data": {"alias": alias}},
         }
 
-    assert await async_setup_component(hass, "automation", {"automation": [
-        auto("hour", {"entity_id": SENSOR}, {"within": {"hours": 1}}),
-        auto("10min", {"entity_id": SENSOR}, {"within": {"minutes": 10}}),
-        auto("b_hour", {"device_id": device.id}, {"within": {"hours": 1}, "keywords": ["ITEM B"]}),
-        auto("b_2h", {"device_id": device.id}, {"within": "02:00:00", "keywords": ["item b"]}),
-        auto("default", {"entity_id": EVENT}, {}),
-    ]})
+    assert await async_setup_component(
+        hass,
+        "automation",
+        {
+            "automation": [
+                auto("hour", {"entity_id": SENSOR}, {"within": {"hours": 1}}),
+                auto("10min", {"entity_id": SENSOR}, {"within": {"minutes": 10}}),
+                auto(
+                    "b_hour",
+                    {"device_id": device.id},
+                    {"within": {"hours": 1}, "keywords": ["ITEM B"]},
+                ),
+                auto(
+                    "b_2h",
+                    {"device_id": device.id},
+                    {"within": "02:00:00", "keywords": ["item b"]},
+                ),
+                auto("default", {"entity_id": EVENT}, {}),
+            ]
+        },
+    )
     hass.bus.async_fire("test_event")
     await hass.async_block_till_done()
     assert sorted(c.data["alias"] for c in calls) == ["b_2h", "default", "hour"]
 
 
 async def test_no_new_articles_trigger(
-    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
 ) -> None:
+    """הטריגר נורה פעם אחת לכל שתיקה, וכתבה חדשה מאפסת אותו."""
     freezer.move_to("2026-10-01 10:30:00+00:00")
     await _setup_feed(hass, aioclient_mock, entry, [("c", D3), ("b", D2)])
     calls = async_mock_service(hass, "test", "automation")
-    assert await async_setup_component(hass, "automation", {"automation": [
+    assert await async_setup_component(
+        hass,
+        "automation",
         {
-            "alias": alias,
-            "triggers": {"trigger": "news_card.no_new_articles", "target": {"entity_id": EVENT}, "options": options},
-            "actions": {"action": "test.automation", "data": {"alias": alias, "feed": "{{ trigger.feed }}", "entity": "{{ trigger.entity_id }}"}},
-        }
-        for alias, options in (("1h", {"for": {"hours": 1}}), ("default", {}), ("past", {"for": {"minutes": 10}}))
-    ]})
+            "automation": [
+                {
+                    "alias": alias,
+                    "triggers": {
+                        "trigger": "news_card.no_new_articles",
+                        "target": {"entity_id": EVENT},
+                        "options": options,
+                    },
+                    "actions": {
+                        "action": "test.automation",
+                        "data": {
+                            "alias": alias,
+                            "feed": "{{ trigger.feed }}",
+                            "entity": "{{ trigger.entity_id }}",
+                        },
+                    },
+                }
+                for alias, options in (
+                    ("1h", {"for": {"hours": 1}}),
+                    ("default", {}),
+                    ("past", {"for": {"minutes": 10}}),
+                )
+            ]
+        },
+    )
 
     async def at(when: str) -> None:
         freezer.move_to(when)
@@ -593,16 +943,314 @@ async def test_no_new_articles_trigger(
     await at("2026-10-01 10:59:00+00:00")
     assert calls == []
     await at("2026-10-01 11:00:01+00:00")
-    assert [(c.data["alias"], c.data["feed"], c.data["entity"]) for c in calls] == [("1h", "JDN", EVENT)]
+    assert [(c.data["alias"], c.data["feed"], c.data["entity"]) for c in calls] == [
+        ("1h", "JDN", EVENT)
+    ]
     await at("2026-10-01 13:00:00+00:00")
     assert len(calls) == 1  # פעם אחת לכל שתיקה
 
     # כתבה חדשה מאפסת את הספירה
     aioclient_mock.clear_requests()
-    aioclient_mock.get(FEED_URL, content=rss([("d", "Thu, 01 Oct 2026 13:00:00 +0000"), ("c", D3)]))
+    aioclient_mock.get(
+        FEED_URL, content=rss([("d", "Thu, 01 Oct 2026 13:00:00 +0000"), ("c", D3)])
+    )
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     await at("2026-10-01 14:00:01+00:00")
     assert [c.data["alias"] for c in calls] == ["1h", "past", "1h"]
     await at("2026-10-02 01:00:01+00:00")
     assert [c.data["alias"] for c in calls] == ["1h", "past", "1h", "default"]
+
+
+# ---------- תיקונים מסקירת הקוד ----------
+
+
+async def test_failed_refresh_does_not_repeat_announcements(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """פיד שנכשל אחרי הצלחה לא מכריז שוב על הכתבות."""
+    aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
+    triggered: list = []
+    hass.bus.async_listen(
+        "state_changed",
+        lambda e: (
+            e.data["entity_id"] == EVENT
+            and e.data["new_state"].state not in ("unavailable", "unknown")
+            and triggered.append(1)
+        ),
+    )
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, content=rss([("b", D2), ("a", D1)]))
+    await _refresh(hass, freezer)
+    assert len(bus) == 1
+    assert len(triggered) == 1
+    # כשל אחרי הצלחה מעדכן את המאזינים עם הנתונים הקודמים; הכתבה לא מוכרזת שוב
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=500)
+    await _refresh(hass, freezer)
+    assert len(bus) == 1
+    assert len(triggered) == 1
+
+
+async def test_new_article_during_reload_is_announced(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry
+) -> None:
+    """כתבה שהתפרסמה בזמן טעינה מחדש מוכרזת."""
+    aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    bus = async_capture_events(hass, EVENT_NEW_ARTICLE)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, content=rss([("b", D2), ("a", D1)]))
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    # הטעינה לא מחכה לאתר: הנתונים השמורים זמינים מיד
+    assert entry.state is ConfigEntryState.LOADED
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert [e.data["title"] for e in bus] == ["Item b"]
+
+
+async def test_max_entries_change_ignores_etag(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, entry: MockConfigEntry
+) -> None:
+    """שינוי במספר הכתבות מוריד את הפיד מחדש בלי ETag."""
+    aioclient_mock.get(FEED_URL, content=rss([("a", D1)]), headers={"ETag": '"v1"'})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    # בלי שינוי בהגדרות ה-ETag נשלח
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert aioclient_mock.mock_calls[-1][3]["If-None-Match"] == '"v1"'
+    # אחרי שינוי במספר הכתבות: הורדה מלאה, אחרת 304 היה משאיר את הרשימה הישנה
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "max_entries": 50}
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert "If-None-Match" not in aioclient_mock.mock_calls[-1][3]
+
+
+async def test_page_image_retried_when_feed_unchanged(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """תמונה מהדף נבדקת שוב גם כשהפיד לא השתנה."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="T", data={"url": FEED_URL}, options=DEFAULT_OPTIONS
+    )
+    aioclient_mock.get(FEED_URL, content=rss([("a", D1)]))
+    aioclient_mock.get("https://example.com/a", status=404)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.data.entries[0]["image"] is None
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=304)
+    aioclient_mock.get(
+        "https://example.com/a",
+        text='<html><head><meta property="og:image" content="/og.jpg"></head><body>text</body></html>',
+    )
+    await _refresh(hass, freezer)
+    assert entry.runtime_data.data.entries[0]["image"] == "https://example.com/og.jpg"
+
+
+async def test_page_images_never_reach_local_network(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """חיפוש תמונות בדפים לא פונה לרשת המקומית, גם לא דרך הפניה."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="T", data={"url": FEED_URL}, options=DEFAULT_OPTIONS
+    )
+    content = rss([("a", D1), ("b", D2)]).replace(
+        b"https://example.com/a", b"http://192.168.1.1/admin"
+    )
+    aioclient_mock.get(FEED_URL, content=content)
+    # דף ציבורי שמפנה לרשת המקומית
+    aioclient_mock.get(
+        "https://example.com/b", status=302, headers={"Location": "http://10.0.0.2/x"}
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    hosts = {str(call[1].host) for call in aioclient_mock.mock_calls}
+    assert hosts == {"www.jdn.co.il", "example.com"}
+
+
+async def test_fetch_stops_at_marker(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """ההורדה נעצרת בסימן שנקבע, בלי תלות באותיות גדולות."""
+    body = b"<html><head><title>t</title></HEAD>" + b"x" * 300_000
+    aioclient_mock.get("https://example.com/page", content=body)
+    session = async_get_clientsession(hass)
+    result = await async_fetch(
+        session,
+        "https://example.com/page",
+        max_bytes=PAGE_MAX_BYTES,
+        truncate=True,
+        stop_at=b"</head>",
+    )
+    assert result.content is not None
+    assert b"</HEAD>" in result.content
+    assert len(result.content) < len(body)
+
+
+async def test_unchanged_feed_not_saved_every_refresh(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """פיד שלא השתנה נשמר לדיסק רק אחרי כמה שעות, ולא בכל ריענון."""
+    key = f"{DOMAIN}.{loaded.entry_id}"
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=304)
+    with patch.object(
+        Store,
+        "async_delay_save",
+        autospec=True,
+        side_effect=Store.async_delay_save,
+    ) as delay_save:
+
+        def saves() -> int:
+            return sum(call.args[0].key == key for call in delay_save.call_args_list)
+
+        await _refresh(hass, freezer)
+        assert saves() == 0
+        freezer.tick(timedelta(hours=7))
+        await _refresh(hass, freezer)
+        assert saves() == 1
+
+
+async def test_refresh_service_fetches_each_feed_once(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, loaded: MockConfigEntry
+) -> None:
+    """ריענון כמה ישויות של אותו פיד מוריד אותו פעם אחת, ושגיאה מציינת את הפיד."""
+    calls = aioclient_mock.call_count
+    await hass.services.async_call(
+        DOMAIN,
+        "refresh",
+        {"entity_id": [SENSOR, EVENT, "sensor.jdn_articles"]},
+        blocking=True,
+    )
+    assert aioclient_mock.call_count == calls + 1
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=500)
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            DOMAIN, "refresh", {"entity_id": [SENSOR, EVENT]}, blocking=True
+        )
+    assert err.value.translation_placeholders == {
+        "title": "JDN",
+        "error": "server_error",
+    }
+
+
+async def test_repair_flow_rejects_existing_feed(
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """תיקון לכתובת של פיד אחר שכבר קיים נדחה."""
+    assert await async_setup_component(hass, "repairs", {})
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=410)
+    await _refresh(hass, freezer)
+    other = "https://www.emess.co.il/feed"
+    MockConfigEntry(
+        domain=DOMAIN, title="Emess", unique_id=other, data={"url": other}
+    ).add_to_hass(hass)
+    aioclient_mock.get(
+        other, content=fixture("emess.xml"), headers={"Content-Type": RSS}
+    )
+    client = await hass_client()
+    resp = await client.post(
+        "/api/repairs/issues/fix",
+        json={"handler": DOMAIN, "issue_id": f"feed_unreachable_{loaded.entry_id}"},
+    )
+    flow = await resp.json()
+    resp = await client.post(
+        f"/api/repairs/issues/fix/{flow['flow_id']}", json={"url": other}
+    )
+    assert (await resp.json())["errors"] == {"base": "already_configured"}
+    assert loaded.data["url"] == FEED_URL
+
+
+async def test_remove_entry_deletes_repair_issue(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """מחיקת הרשומה מוחקת את התקלה שלה."""
+    issue_id = f"feed_unreachable_{loaded.entry_id}"
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, status=404)
+    await _refresh(hass, freezer)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    await hass.config_entries.async_remove(loaded.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_article_details_not_recorded(
+    recorder_mock: Recorder,
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entry: MockConfigEntry,
+) -> None:
+    """בהיסטוריה נשמרים הכותרת וסוג האירוע, בלי התקציר, הקישור והתמונה."""
+    start = dt_util.utcnow()
+    await _setup_feed(hass, aioclient_mock, entry, [("a", D1)])
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(FEED_URL, content=rss([("b", D2), ("a", D1)]))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    # במצב החי הפרטים קיימים, רק לא נשמרים בהיסטוריה
+    assert hass.states.get(EVENT).attributes["summary"] == "About b"
+    assert hass.states.get(SENSOR).attributes["summary"] == "About b"
+    await async_wait_recording_done(hass)
+
+    history = await hass.async_add_executor_job(
+        get_significant_states, hass, start, None, [EVENT, SENSOR]
+    )
+    event = history[EVENT][-1].attributes
+    assert event["title"] == "Item b"  # הכותרת נשארת בהיסטוריה
+    assert event["event_type"] == "new_article"
+    assert not {"summary", "link", "image", "media"} & set(event)
+    sensor = history[SENSOR][-1]
+    assert sensor.state == "Item b"
+    assert not {"summary", "link", "image"} & set(sensor.attributes)
+
+
+async def test_image_proxy_blocks_local_network_and_remembers_failures(
+    hass: HomeAssistant,
+    hass_client,
+    aioclient_mock: AiohttpClientMocker,
+    loaded: MockConfigEntry,
+) -> None:
+    """הפרוקסי לא פונה לרשת המקומית, ותמונה שנכשלה לא מורדת שוב מיד."""
+    entries = loaded.runtime_data.data.entries
+    entries[0]["image"] = "http://10.0.0.5/camera.jpg"
+    aioclient_mock.get(entries[1]["image"], status=500)
+    client = await hass_client()
+    base = f"/api/news_card/image/{loaded.entry_id}/"
+    calls = aioclient_mock.call_count
+    assert (
+        await client.get(base + make_id(entries[0]["image"]))
+    ).status == HTTPStatus.BAD_GATEWAY
+    assert aioclient_mock.call_count == calls  # לא נשלחה בקשה לרשת המקומית
+    for _ in range(3):
+        assert (
+            await client.get(base + make_id(entries[1]["image"]))
+        ).status == HTTPStatus.BAD_GATEWAY
+    assert aioclient_mock.call_count == calls + 1  # תמונה שנכשלה לא מורדת שוב מיד

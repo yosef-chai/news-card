@@ -1,13 +1,11 @@
 """זרימת הגדרה: הוספה, גילוי פידים בדף HTML, הגדרה מחדש ואפשרויות."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, override
 from urllib.parse import urljoin, urlparse, urlunparse
 
-import probatio as vol
+import probatio
 
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -57,21 +55,21 @@ from .const import (
     CONF_INCLUDE_IMAGE,
     CONF_INCLUDE_SUMMARY,
     CONF_KEYWORDS,
+    CONF_MAX_ENTRIES,
     CONF_MODE,
     CONF_NOTIFY,
+    CONF_PAGE_IMAGES,
+    CONF_PROXY_IMAGES,
     CONF_QUIET_END,
     CONF_QUIET_START,
+    CONF_SCAN_INTERVAL,
     CONF_SPEAKERS,
     CONF_TIME,
     CONF_TTS_ENGINE,
-    CONF_WEEKDAYS,
-    CONF_MAX_ENTRIES,
-    CONF_PAGE_IMAGES,
-    CONF_PROXY_IMAGES,
-    CONF_SCAN_INTERVAL,
     CONF_URL,
     CONF_USER_AGENT,
     CONF_VERIFY_SSL,
+    CONF_WEEKDAYS,
     DEFAULT_OPTIONS,
     DOMAIN,
     FEED_MAX_BYTES,
@@ -82,14 +80,28 @@ from .const import (
 from .feed import FeedError, parse_feed
 
 FEEDREADER_DOMAIN = "feedreader"
-COMMON_FEED_PATHS = ("feed", "rss", "feed.xml", "rss.xml", "atom.xml", "index.xml", "feed.json")
+COMMON_FEED_PATHS = (
+    "feed",
+    "rss",
+    "feed.xml",
+    "rss.xml",
+    "atom.xml",
+    "index.xml",
+    "feed.json",
+)
 PROBE_TIMEOUT = 10
 
 
 class FeedValidationError(Exception):
     """שגיאת אימות עם מפתח תרגום ופידים שהתגלו."""
 
-    def __init__(self, reason: str, discovered: list[tuple[str, str]] | None = None, status: int | None = None) -> None:
+    def __init__(
+        self,
+        reason: str,
+        discovered: list[tuple[str, str]] | None = None,
+        status: int | None = None,
+    ) -> None:
+        """שומר את הסיבה, הפידים שהתגלו והסטטוס."""
         super().__init__(reason)
         self.reason = reason
         self.discovered = discovered or []
@@ -103,7 +115,16 @@ def normalize_url(url: str) -> str:
         url = f"https://{url}"
     parts = urlparse(url)
     path = parts.path.rstrip("/") or ""
-    return urlunparse((parts.scheme.lower(), parts.netloc.lower(), path, parts.params, parts.query, ""))
+    return urlunparse(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            path,
+            parts.params,
+            parts.query,
+            "",
+        )
+    )
 
 
 type Fetch = Callable[..., Awaitable[FetchResult]]
@@ -124,25 +145,36 @@ def _fetcher(session: Any, user_agent: str | None) -> Fetch:
     return fetch
 
 
-async def _async_check_feed(hass: HomeAssistant, fetch: Fetch, url: str, timeout: float = FETCH_TIMEOUT) -> tuple[str, str]:
+async def _async_check_feed(
+    hass: HomeAssistant, fetch: Fetch, url: str, timeout: float = FETCH_TIMEOUT
+) -> tuple[str, str]:
     """מוריד ומנתח. מחזיר (כתובת סופית, כותרת). זורק FetchError / FeedError."""
     result = await fetch(url, max_bytes=FEED_MAX_BYTES, timeout=timeout, truncate=True)
     parsed = await hass.async_add_executor_job(
-        parse_feed, result.content or b"", result.url, result.content_type, 1, result.charset
+        parse_feed,
+        result.content or b"",
+        result.url,
+        result.content_type,
+        1,
+        result.charset,
     )
     return result.url, parsed.info["title"]
 
 
-async def _async_probe_paths(hass: HomeAssistant, fetch: Fetch, page_url: str) -> list[tuple[str, str]]:
+async def _async_probe_paths(
+    hass: HomeAssistant, fetch: Fetch, page_url: str
+) -> list[tuple[str, str]]:
     """פידים בנתיבים המקובלים (WordPress, Ghost, Hugo, Jekyll), לאתר שלא מצהיר על פיד בדף."""
     parts = urlparse(page_url)
     bases = dict.fromkeys((urljoin(page_url, "."), f"{parts.scheme}://{parts.netloc}/"))
-    candidates = dict.fromkeys(urljoin(base, path) for base in bases for path in COMMON_FEED_PATHS)
+    candidates = dict.fromkeys(
+        urljoin(base, path) for base in bases for path in COMMON_FEED_PATHS
+    )
 
     async def check(url: str) -> tuple[str, str] | None:
         try:
             return await _async_check_feed(hass, fetch, url, PROBE_TIMEOUT)
-        except (FetchError, FeedError):
+        except FetchError, FeedError:
             return None
 
     hits: dict[str, str] = {}
@@ -153,7 +185,11 @@ async def _async_probe_paths(hass: HomeAssistant, fetch: Fetch, page_url: str) -
 
 
 async def async_validate_feed(
-    hass: HomeAssistant, url: str, verify_ssl: bool = True, probe: bool = True, user_agent: str | None = None
+    hass: HomeAssistant,
+    url: str,
+    verify_ssl: bool = True,
+    probe: bool = True,
+    user_agent: str | None = None,
 ) -> tuple[str, str]:
     """מוריד ומנתח. מחזיר (כתובת סופית, כותרת הפיד).
 
@@ -177,13 +213,21 @@ async def async_validate_feed(
                 pass
             except FeedError as page:
                 # האתר עוד מצהיר לפעמים על הכתובת השבורה
-                found = [f for f in await _async_found(hass, fetch, home, page, probe) if f[0] != url]
+                found = [
+                    f
+                    for f in await _async_found(hass, fetch, home, page, probe)
+                    if f[0] != url
+                ]
         raise FeedValidationError(err.reason, found, err.status) from err
     except FeedError as err:
-        raise FeedValidationError(err.reason, await _async_found(hass, fetch, url, err, probe)) from err
+        raise FeedValidationError(
+            err.reason, await _async_found(hass, fetch, url, err, probe)
+        ) from err
 
 
-async def _async_found(hass: HomeAssistant, fetch: Fetch, url: str, err: FeedError, probe: bool) -> list[tuple[str, str]]:
+async def _async_found(
+    hass: HomeAssistant, fetch: Fetch, url: str, err: FeedError, probe: bool
+) -> list[tuple[str, str]]:
     """הפידים שמוצעים לדף שאינו פיד: המוצהרים, ואם אין, נתיבים מקובלים וקישורים בדף."""
     if not probe or err.reason != "not_a_feed" or err.discovered:
         return err.discovered or err.links
@@ -205,7 +249,9 @@ def _url_selector(hass: HomeAssistant) -> Any:
     """בורר כתובת. אם יש פידים ב-Feedreader, הם מוצעים לבחירה (ואפשר להקליד כתובת אחרת)."""
     if urls := _feedreader_urls(hass):
         return SelectSelector(
-            SelectSelectorConfig(options=urls, custom_value=True, mode=SelectSelectorMode.DROPDOWN)
+            SelectSelectorConfig(
+                options=urls, custom_value=True, mode=SelectSelectorMode.DROPDOWN
+            )
         )
     return TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
 
@@ -214,7 +260,10 @@ def user_agent_selector() -> SelectSelector:
     """דפדפן מהרשימה, או כל טקסט אחר. נשלח רק כשהבקשה הרגילה נדחית."""
     return SelectSelector(
         SelectSelectorConfig(
-            options=[USER_AGENT_BROWSER], custom_value=True, mode=SelectSelectorMode.DROPDOWN, translation_key=CONF_USER_AGENT
+            options=[USER_AGENT_BROWSER],
+            custom_value=True,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key=CONF_USER_AGENT,
         )
     )
 
@@ -229,6 +278,7 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
+        """מצב הזרימה בין השלבים."""
         self._discovered: list[tuple[str, str]] = []
         self._verify_ssl = True
         self._user_agent = ""
@@ -236,7 +286,9 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
         self._status = ""
 
     @override
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         placeholders: dict[str, str] = {"status": ""}
         example = {"example": "https://www.example.com/feed"}
@@ -250,16 +302,19 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
                     return await self._async_show_found(err)
                 if err.reason in FALLBACK_REASONS:
                     # האתר מסרב לקורא פידים; מציעים לנסות עם User-Agent אחר
-                    self._url, self._status = user_input[CONF_URL], str(err.status or "")
+                    self._url, self._status = (
+                        user_input[CONF_URL],
+                        str(err.status or ""),
+                    )
                     return await self.async_step_user_agent()
                 errors["base"] = err.reason
                 placeholders = _error_placeholders(err)
         placeholders |= example
 
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Required(CONF_URL): _url_selector(self.hass),
-                vol.Optional(CONF_VERIFY_SSL, default=True): BooleanSelector(),
+                probatio.Required(CONF_URL): _url_selector(self.hass),
+                probatio.Optional(CONF_VERIFY_SSL, default=True): BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -271,12 +326,21 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _async_show_found(self, err: FeedValidationError) -> ConfigFlowResult:
         self._discovered = err.discovered
-        return await (self.async_step_moved() if err.reason == "not_found" else self.async_step_select_feed())
+        return await (
+            self.async_step_moved()
+            if err.reason == "not_found"
+            else self.async_step_select_feed()
+        )
 
-    async def async_step_user_agent(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user_agent(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """האתר סירב: ניסיון חוזר עם User-Agent של דפדפן או אחר, שיישמר בהגדרות הפיד."""
         errors: dict[str, str] = {}
-        placeholders = {"host": urlparse(normalize_url(self._url)).netloc, "status": self._status}
+        placeholders = {
+            "host": urlparse(normalize_url(self._url)).netloc,
+            "status": self._status,
+        }
         if user_input is not None:
             option = (user_input.get(CONF_USER_AGENT) or "").strip()
             if not option or not valid_user_agent(option):
@@ -288,19 +352,27 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
                 except FeedValidationError as err:
                     if err.discovered:
                         return await self._async_show_found(err)
-                    errors["base"] = "still_refused" if err.reason in (*FALLBACK_REASONS, "blocked") else err.reason
+                    errors["base"] = (
+                        "still_refused"
+                        if err.reason in (*FALLBACK_REASONS, "blocked")
+                        else err.reason
+                    )
                     placeholders["status"] = str(err.status or "")
         return self.async_show_form(
             step_id="user_agent",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema({vol.Required(CONF_USER_AGENT): user_agent_selector()}),
+                probatio.Schema(
+                    {probatio.Required(CONF_USER_AGENT): user_agent_selector()}
+                ),
                 user_input or {CONF_USER_AGENT: self._user_agent or USER_AGENT_BROWSER},
             ),
             errors=errors,
             description_placeholders=placeholders,
         )
 
-    async def async_step_moved(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """הפיד לא קיים יותר בכתובת: בחירה מתוך הפידים שנמצאו בדף הבית."""
         return await self.async_step_select_feed(user_input, "moved")
 
@@ -320,15 +392,24 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     errors["base"] = err.reason
                     placeholders = _error_placeholders(err)
-        options = [SelectOptionDict(value=url, label=f"{title} — {url}" if title != url else url) for url, title in self._discovered]
-        mode = SelectSelectorMode.LIST if len(options) <= 10 else SelectSelectorMode.DROPDOWN
+        options = [
+            SelectOptionDict(
+                value=url, label=f"{title} — {url}" if title != url else url
+            )
+            for url, title in self._discovered
+        ]
+        mode = (
+            SelectSelectorMode.LIST
+            if len(options) <= 10
+            else SelectSelectorMode.DROPDOWN
+        )
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(CONF_URL, default=self._discovered[0][0]): SelectSelector(
-                        SelectSelectorConfig(options=options, mode=mode)
-                    )
+                    probatio.Required(
+                        CONF_URL, default=self._discovered[0][0]
+                    ): SelectSelector(SelectSelectorConfig(options=options, mode=mode))
                 }
             ),
             errors=errors,
@@ -338,17 +419,25 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_create(self, url: str, probe: bool = True) -> ConfigFlowResult:
         await self.async_set_unique_id(normalize_url(url))
         self._abort_if_unique_id_configured()
-        final_url, title = await async_validate_feed(self.hass, url, self._verify_ssl, probe, self._user_agent)
+        final_url, title = await async_validate_feed(
+            self.hass, url, self._verify_ssl, probe, self._user_agent
+        )
         if normalize_url(final_url) != self.unique_id:
             await self.async_set_unique_id(normalize_url(final_url))
             self._abort_if_unique_id_configured()
         return self.async_create_entry(
             title=title,
             data={CONF_URL: final_url},
-            options={**DEFAULT_OPTIONS, CONF_VERIFY_SSL: self._verify_ssl, CONF_USER_AGENT: self._user_agent},
+            options={
+                **DEFAULT_OPTIONS,
+                CONF_VERIFY_SSL: self._verify_ssl,
+                CONF_USER_AGENT: self._user_agent,
+            },
         )
 
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """החלפת כתובת הפיד."""
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
@@ -357,7 +446,11 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
             verify = entry.options.get(CONF_VERIFY_SSL, True)
             try:
                 final_url, _ = await async_validate_feed(
-                    self.hass, user_input[CONF_URL], verify, probe=False, user_agent=entry.options.get(CONF_USER_AGENT)
+                    self.hass,
+                    user_input[CONF_URL],
+                    verify,
+                    probe=False,
+                    user_agent=entry.options.get(CONF_USER_AGENT),
                 )
             except FeedValidationError as err:
                 errors["base"] = err.reason
@@ -370,11 +463,17 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
                 ):
                     return self.async_abort(reason="already_configured")
                 # מאזין העדכונים של הרשומה טוען אותה מחדש
-                return self.async_update_and_abort(entry, unique_id=unique_id, data_updates={CONF_URL: final_url})
+                return self.async_update_and_abort(
+                    entry, unique_id=unique_id, data_updates={CONF_URL: final_url}
+                )
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
-                {vol.Required(CONF_URL, default=entry.data[CONF_URL]): _url_selector(self.hass)}
+            data_schema=probatio.Schema(
+                {
+                    probatio.Required(
+                        CONF_URL, default=entry.data[CONF_URL]
+                    ): _url_selector(self.hass)
+                }
             ),
             errors=errors,
             description_placeholders=placeholders,
@@ -389,14 +488,19 @@ class NewsCardConfigFlow(ConfigFlow, domain=DOMAIN):
     @override
     @classmethod
     @callback
-    def async_get_supported_subentry_types(cls, config_entry: ConfigEntry) -> dict[str, type[ConfigSubentryFlow]]:
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
         return {SUBENTRY_ALERT: AlertSubentryFlow}
 
 
 class NewsCardOptionsFlow(OptionsFlow):
     """אפשרויות פיד."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """טופס האפשרויות של הפיד."""
         errors: dict[str, str] = {}
         if user_input is not None:
             # שדה שנוקה לא מגיע בכלל
@@ -413,29 +517,51 @@ class NewsCardOptionsFlow(OptionsFlow):
                 )
             errors[CONF_USER_AGENT] = "invalid_user_agent"
         current = {**DEFAULT_OPTIONS, **self.config_entry.options, **(user_input or {})}
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Required(CONF_SCAN_INTERVAL): NumberSelector(
-                    NumberSelectorConfig(min=5, max=1440, step=1, mode=NumberSelectorMode.BOX, unit_of_measurement="min")
+                probatio.Required(CONF_SCAN_INTERVAL): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5,
+                        max=1440,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="min",
+                    )
                 ),
-                vol.Required(CONF_MAX_ENTRIES): NumberSelector(
-                    NumberSelectorConfig(min=1, max=MAX_ENTRIES_LIMIT, step=1, mode=NumberSelectorMode.BOX)
+                probatio.Required(CONF_MAX_ENTRIES): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=MAX_ENTRIES_LIMIT,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                    )
                 ),
-                vol.Optional(CONF_KEYWORDS): TextSelector(TextSelectorConfig(multiline=True)),
-                vol.Required(CONF_PROXY_IMAGES): BooleanSelector(),
-                vol.Required(CONF_PAGE_IMAGES): BooleanSelector(),
-                vol.Required(CONF_VERIFY_SSL): BooleanSelector(),
-                vol.Optional(CONF_USER_AGENT): user_agent_selector(),
+                probatio.Optional(CONF_KEYWORDS): TextSelector(
+                    TextSelectorConfig(multiline=True)
+                ),
+                probatio.Required(CONF_PROXY_IMAGES): BooleanSelector(),
+                probatio.Required(CONF_PAGE_IMAGES): BooleanSelector(),
+                probatio.Required(CONF_VERIFY_SSL): BooleanSelector(),
+                probatio.Optional(CONF_USER_AGENT): user_agent_selector(),
             }
         )
         return self.async_show_form(
-            step_id="init", data_schema=self.add_suggested_values_to_schema(schema, current), errors=errors
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(schema, current),
+            errors=errors,
         )
 
 
 WEEKDAY_OPTIONS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 NOTIFY_SKIP = ("notify", "send_message")
-_MAIN_FIELDS = ("mode", "notify", "speakers", "tts_engine", "include_summary", "include_image")
+_MAIN_FIELDS = (
+    "mode",
+    "notify",
+    "speakers",
+    "tts_engine",
+    "include_summary",
+    "include_image",
+)
 _STEP_FIELDS = ("keywords", "speak_from", "speak_until", "time", "weekdays", "count")
 
 
@@ -447,7 +573,10 @@ def notify_target_options(hass: HomeAssistant) -> list[SelectOptionDict]:
         if (name := e.data.get("device_name") or e.title)
     }
     options = [
-        SelectOptionDict(value=f"notify.{service}", label=phones.get(service, service.replace("_", " ")))
+        SelectOptionDict(
+            value=f"notify.{service}",
+            label=phones.get(service, service.replace("_", " ")),
+        )
         for service in sorted(hass.services.async_services_for_domain("notify"))
         if service not in NOTIFY_SKIP
     ]
@@ -456,7 +585,9 @@ def notify_target_options(hass: HomeAssistant) -> list[SelectOptionDict]:
     options += [
         SelectOptionDict(value=s.entity_id, label=s.name)
         for s in hass.states.async_all("notify")
-        if not ((reg := registry.async_get(s.entity_id)) and reg.platform == "mobile_app")
+        if not (
+            (reg := registry.async_get(s.entity_id)) and reg.platform == "mobile_app"
+        )
     ]
     return options
 
@@ -465,11 +596,19 @@ class AlertSubentryFlow(ConfigSubentryFlow):
     """התראה לפיד: למי (טלפון, רמקולים), מתי (כל כתבה חדשה או בשעה קבועה) ומה."""
 
     def __init__(self) -> None:
+        """מצב הזרימה בין השלבים."""
         self._title = ""
         self._data: dict[str, Any] = {}
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        phones = [o["value"] for o in notify_target_options(self.hass) if o["value"].startswith("notify.mobile_app_")]
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """התראה חדשה: יעדים וסוג."""
+        phones = [
+            o["value"]
+            for o in notify_target_options(self.hass)
+            if o["value"].startswith("notify.mobile_app_")
+        ]
         engine = default_tts_engine(self.hass)
         defaults = {
             CONF_NAME: self._get_entry().title,
@@ -481,9 +620,14 @@ class AlertSubentryFlow(ConfigSubentryFlow):
         }
         return await self._async_step_main("user", user_input, defaults)
 
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """עריכה של התראה קיימת."""
         subentry = self._get_reconfigure_subentry()
-        return await self._async_step_main("reconfigure", user_input, {CONF_NAME: subentry.title, **subentry.data})
+        return await self._async_step_main(
+            "reconfigure", user_input, {CONF_NAME: subentry.title, **subentry.data}
+        )
 
     async def _async_step_main(
         self, step_id: str, user_input: dict[str, Any] | None, current: dict[str, Any]
@@ -498,7 +642,11 @@ class AlertSubentryFlow(ConfigSubentryFlow):
                 self._title = user_input[CONF_NAME]
                 # שדה שנוקה לא מגיע בכלל, ולכן בונים מחדש ולא ממזגים עם הקיים
                 self._data = {
-                    **{k: v for k, v in current.items() if k not in (*_MAIN_FIELDS, CONF_NAME)},
+                    **{
+                        k: v
+                        for k, v in current.items()
+                        if k not in (*_MAIN_FIELDS, CONF_NAME)
+                    },
                     CONF_MODE: user_input[CONF_MODE],
                     CONF_NOTIFY: user_input.get(CONF_NOTIFY, []),
                     CONF_SPEAKERS: user_input.get(CONF_SPEAKERS, []),
@@ -510,21 +658,31 @@ class AlertSubentryFlow(ConfigSubentryFlow):
                     return await self.async_step_daily()
                 return await self.async_step_new_article()
             current = {**current, **user_input}
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Required(CONF_NAME): TextSelector(),
-                vol.Required(CONF_MODE): SelectSelector(
+                probatio.Required(CONF_NAME): TextSelector(),
+                probatio.Required(CONF_MODE): SelectSelector(
                     SelectSelectorConfig(
-                        options=[ALERT_MODE_NEW, ALERT_MODE_DAILY], translation_key="alert_mode", mode=SelectSelectorMode.LIST
+                        options=[ALERT_MODE_NEW, ALERT_MODE_DAILY],
+                        translation_key="alert_mode",
+                        mode=SelectSelectorMode.LIST,
                     )
                 ),
-                vol.Optional(CONF_NOTIFY): SelectSelector(
-                    SelectSelectorConfig(options=notify_target_options(self.hass), multiple=True, mode=SelectSelectorMode.DROPDOWN)
+                probatio.Optional(CONF_NOTIFY): SelectSelector(
+                    SelectSelectorConfig(
+                        options=notify_target_options(self.hass),
+                        multiple=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
                 ),
-                vol.Optional(CONF_SPEAKERS): EntitySelector(EntitySelectorConfig(domain="media_player", multiple=True)),
-                vol.Optional(CONF_TTS_ENGINE): EntitySelector(EntitySelectorConfig(domain="tts")),
-                vol.Optional(CONF_INCLUDE_SUMMARY): BooleanSelector(),
-                vol.Optional(CONF_INCLUDE_IMAGE): BooleanSelector(),
+                probatio.Optional(CONF_SPEAKERS): EntitySelector(
+                    EntitySelectorConfig(domain="media_player", multiple=True)
+                ),
+                probatio.Optional(CONF_TTS_ENGINE): EntitySelector(
+                    EntitySelectorConfig(domain="tts")
+                ),
+                probatio.Optional(CONF_INCLUDE_SUMMARY): BooleanSelector(),
+                probatio.Optional(CONF_INCLUDE_IMAGE): BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -534,7 +692,10 @@ class AlertSubentryFlow(ConfigSubentryFlow):
             description_placeholders={"feed": self._get_entry().title},
         )
 
-    async def async_step_new_article(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+    async def async_step_new_article(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """הגדרות של התראה על כל כתבה חדשה."""
         if user_input is not None:
             return self._async_finish(
                 {
@@ -543,17 +704,29 @@ class AlertSubentryFlow(ConfigSubentryFlow):
                     CONF_QUIET_END: user_input[CONF_QUIET_END],
                 }
             )
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Optional(CONF_KEYWORDS): TextSelector(TextSelectorConfig(multiple=True)),
-                vol.Required(CONF_QUIET_START): TimeSelector(),
-                vol.Required(CONF_QUIET_END): TimeSelector(),
+                probatio.Optional(CONF_KEYWORDS): TextSelector(
+                    TextSelectorConfig(multiple=True)
+                ),
+                probatio.Required(CONF_QUIET_START): TimeSelector(),
+                probatio.Required(CONF_QUIET_END): TimeSelector(),
             }
         )
-        defaults = {CONF_QUIET_START: "08:00:00", CONF_QUIET_END: "22:00:00", **self._data}
-        return self.async_show_form(step_id="new_article", data_schema=self.add_suggested_values_to_schema(schema, defaults))
+        defaults = {
+            CONF_QUIET_START: "08:00:00",
+            CONF_QUIET_END: "22:00:00",
+            **self._data,
+        }
+        return self.async_show_form(
+            step_id="new_article",
+            data_schema=self.add_suggested_values_to_schema(schema, defaults),
+        )
 
-    async def async_step_daily(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+    async def async_step_daily(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """הגדרות של סיכום בשעה קבועה."""
         errors: dict[str, str] = {}
         if user_input is not None:
             if not user_input.get(CONF_WEEKDAYS):
@@ -566,27 +739,47 @@ class AlertSubentryFlow(ConfigSubentryFlow):
                         CONF_COUNT: int(user_input[CONF_COUNT]),
                     }
                 )
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Required(CONF_TIME): TimeSelector(),
-                vol.Optional(CONF_WEEKDAYS): SelectSelector(
+                probatio.Required(CONF_TIME): TimeSelector(),
+                probatio.Optional(CONF_WEEKDAYS): SelectSelector(
                     SelectSelectorConfig(
-                        options=WEEKDAY_OPTIONS, multiple=True, translation_key="weekday", mode=SelectSelectorMode.LIST
+                        options=WEEKDAY_OPTIONS,
+                        multiple=True,
+                        translation_key="weekday",
+                        mode=SelectSelectorMode.LIST,
                     )
                 ),
-                vol.Required(CONF_COUNT): NumberSelector(NumberSelectorConfig(min=1, max=10, step=1, mode=NumberSelectorMode.BOX)),
+                probatio.Required(CONF_COUNT): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1, max=10, step=1, mode=NumberSelectorMode.BOX
+                    )
+                ),
             }
         )
-        defaults = {CONF_TIME: "09:00:00", CONF_WEEKDAYS: WEEKDAY_OPTIONS, CONF_COUNT: 1, **self._data, **(user_input or {})}
+        defaults = {
+            CONF_TIME: "09:00:00",
+            CONF_WEEKDAYS: WEEKDAY_OPTIONS,
+            CONF_COUNT: 1,
+            **self._data,
+            **(user_input or {}),
+        }
         return self.async_show_form(
-            step_id="daily", data_schema=self.add_suggested_values_to_schema(schema, defaults), errors=errors
+            step_id="daily",
+            data_schema=self.add_suggested_values_to_schema(schema, defaults),
+            errors=errors,
         )
 
     @callback
     def _async_finish(self, step_data: dict[str, Any]) -> SubentryFlowResult:
-        data = {k: v for k, v in self._data.items() if k not in _STEP_FIELDS} | step_data
+        data = {
+            k: v for k, v in self._data.items() if k not in _STEP_FIELDS
+        } | step_data
         if self.source == SOURCE_RECONFIGURE:
             return self.async_update_and_abort(
-                self._get_entry(), self._get_reconfigure_subentry(), title=self._title, data=data
+                self._get_entry(),
+                self._get_reconfigure_subentry(),
+                title=self._title,
+                data=data,
             )
         return self.async_create_entry(title=self._title, data=data)

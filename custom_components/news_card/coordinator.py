@@ -1,11 +1,10 @@
 """מתאם עדכונים: הורדה, ניתוח, העשרת תמונות, זיהוי פריטים חדשים ושמירה מתמשכת."""
 
-from __future__ import annotations
-
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from itertools import islice
 import logging
 from typing import Any, override
 from urllib.parse import urlparse
@@ -17,11 +16,21 @@ from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.target import TargetSelection, async_extract_referenced_entity_ids
+from homeassistant.helpers.target import (
+    TargetSelection,
+    async_extract_referenced_entity_ids,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .client import FALLBACK_REASONS, FetchError, FetchResult, async_fetch, find_page_image, resolve_user_agent
+from .client import (
+    FALLBACK_REASONS,
+    FetchError,
+    FetchResult,
+    async_fetch,
+    extract_page_image,
+    resolve_user_agent,
+)
 from .const import (
     CONF_KEYWORDS,
     CONF_MAX_ENTRIES,
@@ -54,6 +63,8 @@ NO_PAGE_IMAGE_HOSTS = ("news.google.com",)
 # שגיאות שלא עוברות מעצמן: תקלה בהגדרות מוצגת מיד ולא אחרי יממה
 PERMANENT_ERRORS = ("not_found", "blocked", "refused", "auth_required")
 BACKOFF_MAX = timedelta(hours=1)
+# בתשובת 304 רק זמן הבדיקה משתנה; לא כותבים את כל הקובץ לדיסק בשביל זה בכל ריענון
+SAVE_UNCHANGED_EVERY = timedelta(hours=6)
 
 type NewsCardConfigEntry = ConfigEntry[NewsCardCoordinator]
 
@@ -70,7 +81,9 @@ class NewsFeedData:
 
 def parse_keywords(raw: str) -> list[str]:
     """מילות מפתח מופרדות בפסיק או בשורה חדשה."""
-    return [k.strip().casefold() for k in raw.replace("\n", ",").split(",") if k.strip()]
+    return [
+        k.strip().casefold() for k in raw.replace("\n", ",").split(",") if k.strip()
+    ]
 
 
 def match_keywords(entry: Mapping[str, Any], keywords: list[str]) -> list[str]:
@@ -79,12 +92,27 @@ def match_keywords(entry: Mapping[str, Any], keywords: list[str]) -> list[str]:
     return [k for k in keywords if k in text]
 
 
+def issue_id_for(entry_id: str) -> str:
+    """מזהה הודעת התיקון של פיד (אחת לכל פיד, בכל סוג תקלה)."""
+    return f"feed_unreachable_{entry_id}"
+
+
+def keep_recent(store: dict[str, Any], current: Iterable[str] = ()) -> None:
+    """מזיז לסוף את המזהים שעדיין בפיד וחותך את הישנים ל-STORE_ID_LIMIT, כדי שהזיכרון לא יגדל בלי סוף."""
+    for key in current:
+        if key in store:
+            store[key] = store.pop(key)
+    for key in list(islice(store, max(0, len(store) - STORE_ID_LIMIT))):
+        del store[key]
+
+
 class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
     """מנהל פיד אחד."""
 
     config_entry: NewsCardConfigEntry
 
     def __init__(self, hass: HomeAssistant, entry: NewsCardConfigEntry) -> None:
+        """המתאם של פיד אחד, לפי ההגדרות שלו."""
         options = {**DEFAULT_OPTIONS, **entry.options}
         super().__init__(
             hass,
@@ -96,7 +124,9 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         self.url: str = entry.data[CONF_URL]
         self.options = options
         self.keywords = parse_keywords(options[CONF_KEYWORDS])
-        self.session = async_get_clientsession(hass, verify_ssl=options[CONF_VERIFY_SSL])
+        self.session = async_get_clientsession(
+            hass, verify_ssl=options[CONF_VERIFY_SSL]
+        )
         self.last_error: str | None = None
         self.last_status: int | None = None
         self._first_failure: datetime | None = None
@@ -104,7 +134,14 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         self.user_agent = resolve_user_agent(options[CONF_USER_AGENT])
         self._fallback_until: datetime | None = None
         self._base_interval = timedelta(minutes=options[CONF_SCAN_INTERVAL])
-        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
+        # השמירה מקבלת עותק מוכן (_schedule_save), ולכן אפשר להמיר ל-JSON מחוץ ללולאת האירועים
+        self._store: Store[dict[str, Any]] = Store(
+            hass,
+            STORAGE_VERSION,
+            f"{DOMAIN}.{entry.entry_id}",
+            serialize_in_event_loop=False,
+        )
+        self._saved_at: datetime | None = None
         self._etag: str | None = None
         self._modified: str | None = None
         self._first_seen: dict[str, str] = {}
@@ -116,7 +153,8 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
 
     @property
     def issue_id(self) -> str:
-        return f"feed_unreachable_{self.config_entry.entry_id}"
+        """מזהה הודעת התיקון של הפיד."""
+        return issue_id_for(self.config_entry.entry_id)
 
     async def async_load(self) -> bool:
         """טעינת מצב שמור. מחזיר True אם יש עותק אחרון של הנתונים."""
@@ -126,29 +164,42 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         self._page_images = stored.get("page_images", {})
         self._read = dict.fromkeys(stored.get("read", []))
         self._seeded = bool(stored.get("seeded"))
+        for store in (self._first_seen, self._announced, self._page_images, self._read):
+            keep_recent(store)
         cached = stored.get("cache")
         if cached and cached.get("url") == self.url:
-            self._etag = stored.get("etag")
-            self._modified = stored.get("modified")
-            self.data = NewsFeedData(cached["info"], cached["entries"], cached.get("last_success"))
+            # אחרי שינוי במספר הכתבות לא שולחים ETag: תשובת 304 הייתה משאירה את הרשימה הישנה עד שהפיד משתנה
+            if (
+                cached.get("max_entries", self.options[CONF_MAX_ENTRIES])
+                == self.options[CONF_MAX_ENTRIES]
+            ):
+                self._etag = stored.get("etag")
+                self._modified = stored.get("modified")
+            # אחרי הקטנת מספר הכתבות העותק השמור כבר תואם, עוד לפני שהריענון ברקע מסתיים
+            self.data = NewsFeedData(
+                cached["info"],
+                cached["entries"][: self.options[CONF_MAX_ENTRIES]],
+                cached.get("last_success"),
+            )
             return True
         return False
 
     @callback
-    def _store_payload(self) -> dict[str, Any]:
-        data = self.data
+    def _store_payload(self, data: NewsFeedData | None) -> dict[str, Any]:
+        """עותק עצמאי של המצב. נבנה בלולאת האירועים ומומר ל-JSON ב-thread אחר, ולכן בלי הפניות למבנים שמשתנים."""
         return {
-            "first_seen": dict(list(self._first_seen.items())[-STORE_ID_LIMIT:]),
-            "announced": list(self._announced)[-STORE_ID_LIMIT:],
-            "page_images": dict(list(self._page_images.items())[-STORE_ID_LIMIT:]),
-            "read": list(self._read)[-STORE_ID_LIMIT:],
+            "first_seen": dict(self._first_seen),
+            "announced": list(self._announced),
+            "page_images": dict(self._page_images),
+            "read": list(self._read),
             "seeded": self._seeded,
             "etag": self._etag,
             "modified": self._modified,
             "cache": {
                 "url": self.url,
-                "info": data.info,
-                "entries": data.entries,
+                "max_entries": self.options[CONF_MAX_ENTRIES],
+                "info": dict(data.info),
+                "entries": [dict(e) for e in data.entries],
                 "last_success": data.last_success,
             }
             if data
@@ -177,9 +228,18 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         now = dt_util.utcnow()
         self.last_status = result.status
         if result.content is None and self.data:  # 304: לא השתנה
+            # תמונות שעוד לא נמצאו נבדקות שוב גם כשהפיד לא השתנה
+            looked_up = self.options[CONF_PAGE_IMAGES] and await self._enrich_images(
+                self.data.entries, self.data.info
+            )
             self._handle_success()
             data = NewsFeedData(self.data.info, self.data.entries, now.isoformat())
-            self._schedule_save()
+            if (
+                looked_up
+                or not self._saved_at
+                or now - self._saved_at >= SAVE_UNCHANGED_EVERY
+            ):
+                self._schedule_save(data)
             return data
 
         try:
@@ -204,34 +264,60 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         if self.options[CONF_PAGE_IMAGES]:
             await self._enrich_images(parsed.entries, parsed.info)
         new_entries = self._detect_new(parsed.entries)
+        current = [e["id"] for e in parsed.entries]
+        for store in (self._first_seen, self._announced, self._page_images, self._read):
+            keep_recent(store, current)
+        # ניסיונות של כתבות שיצאו מהפיד לא יחזרו
+        in_feed = set(current)
+        self._page_attempts = {
+            k: v for k, v in self._page_attempts.items() if k in in_feed
+        }
         self._handle_success()
         data = NewsFeedData(parsed.info, parsed.entries, now.isoformat(), new_entries)
-        self._schedule_save()
+        self._schedule_save(data)
         return data
 
     @property
     def fallback_active(self) -> bool:
         """האתר סירב ל-User-Agent הרגיל, ועכשיו משתמשים בזה שבהגדרות."""
-        return bool(self.user_agent and self._fallback_until and dt_util.utcnow() < self._fallback_until)
+        return bool(
+            self.user_agent
+            and self._fallback_until
+            and dt_util.utcnow() < self._fallback_until
+        )
 
     async def _async_fetch_feed(self, **kwargs: Any) -> FetchResult:
         """הורדה רגילה. רק אם האתר מסרב לה, ניסיון חוזר עם ה-User-Agent מההגדרות."""
         if self.fallback_active:
             try:
-                return await async_fetch(self.session, self.url, user_agent=self.user_agent, **kwargs)
+                return await async_fetch(
+                    self.session, self.url, user_agent=self.user_agent, **kwargs
+                )
             except FetchError as err:
                 if err.reason in FALLBACK_REASONS:
-                    self._fallback_until = None  # גם החלופי נדחה; בפעם הבאה מתחילים שוב מהרגיל
+                    self._fallback_until = (
+                        None  # גם החלופי נדחה; בפעם הבאה מתחילים שוב מהרגיל
+                    )
                 raise
         try:
             return await async_fetch(self.session, self.url, **kwargs)
         except FetchError as err:
             if not self.user_agent or err.reason not in FALLBACK_REASONS:
                 raise
-            _LOGGER.debug("%s refused the default User-Agent (%s), retrying with the configured one", self.url, err)
-        result = await async_fetch(self.session, self.url, user_agent=self.user_agent, **kwargs)
+            _LOGGER.debug(
+                "%s refused the default User-Agent (%s), retrying with the configured one",
+                self.url,
+                err,
+            )
+        result = await async_fetch(
+            self.session, self.url, user_agent=self.user_agent, **kwargs
+        )
         if not self._fallback_until:
-            _LOGGER.info("%s accepts only the configured User-Agent; using it for the next %s", self.url, FALLBACK_STICKY)
+            _LOGGER.info(
+                "%s accepts only the configured User-Agent; using it for the next %s",
+                self.url,
+                FALLBACK_STICKY,
+            )
         self._fallback_until = dt_util.utcnow() + FALLBACK_STICKY
         return result
 
@@ -243,7 +329,9 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
             # ponytail: סף 6 שעות לפני הפריט החדש ביותר הקודם, מספיק לפידים שמתעדכנים באיחור
             known = [e["published"] for e in self.data.entries if e["published"]]
             if known:
-                floor = (dt_util.parse_datetime(max(known)) or dt_util.utcnow()) - timedelta(hours=6)
+                floor = (
+                    dt_util.parse_datetime(max(known)) or dt_util.utcnow()
+                ) - timedelta(hours=6)
                 fresh = [
                     e
                     for e in fresh
@@ -257,8 +345,8 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
             return []
         return list(reversed(fresh[:MAX_EVENTS_PER_REFRESH]))  # מהישן לחדש
 
-    async def _enrich_images(self, entries: list[NewsEntry], info: FeedInfo) -> None:
-        """תמונה מדף הכתבה (og:image) לפריטים בלי תמונה.
+    async def _enrich_images(self, entries: list[NewsEntry], info: FeedInfo) -> bool:
+        """תמונה מדף הכתבה (og:image) לפריטים בלי תמונה. מחזיר True אם נבדק דף כלשהו.
 
         כשל רשת או דף בלי תמונה (כתבה טרייה שהתמונה שלה עוד לא עלתה) נבדקים שוב
         בריענונים הבאים, עד PAGE_IMAGE_ATTEMPTS פעמים, ורק אז נשמרים כ"אין תמונה".
@@ -276,8 +364,9 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
             and not urlparse(e["link"]).netloc.endswith(NO_PAGE_IMAGE_HOSTS)
         ][:PAGE_IMAGE_LOOKUPS_PER_REFRESH]
         if not todo:
-            return
+            return False
         sem = asyncio.Semaphore(4)
+        feed_host = urlparse(self.url).hostname
 
         async def lookup(entry: NewsEntry) -> None:
             async with sem:
@@ -291,13 +380,22 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
                         timeout=10,
                         # דפי הכתבות באותו אתר: רק כשכבר ידוע שהרגיל נדחה, בלי בקשה כפולה לכל דף
                         user_agent=self.user_agent if self.fallback_active else None,
+                        # תמונת השיתוף נמצאת ב-<head>; אין צורך בשאר הדף
+                        stop_at=b"</head>",
+                        # הקישור בא מתוכן הפיד: לא לפנות לרשת המקומית
+                        public_only=True,
+                        allowed_host=feed_host,
                     )
                 except FetchError as err:
-                    _LOGGER.debug("Page image lookup failed for %s: %s", entry["link"], err)
+                    _LOGGER.debug(
+                        "Page image lookup failed for %s: %s", entry["link"], err
+                    )
                     self._give_up_page_image(entry["id"])
                     return
-                html = (page.content or b"").decode("utf-8", "replace")
-                found = find_page_image(html)
+                # פענוח וסריקה של עד PAGE_MAX_BYTES לכל דף: מחוץ ללולאת האירועים
+                found = await self.hass.async_add_executor_job(
+                    extract_page_image, page.content or b"", page.charset
+                )
                 image = abs_url(found, page.url) if found else None
                 if image and image != info["icon"]:
                     entry["image"] = image
@@ -307,6 +405,7 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
                     self._give_up_page_image(entry["id"])
 
         await asyncio.gather(*(lookup(e) for e in todo))
+        return True
 
     def _give_up_page_image(self, entry_id: str) -> None:
         """סופר ניסיון כושל; אחרי PAGE_IMAGE_ATTEMPTS מפסיקים לחפש."""
@@ -325,53 +424,89 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         ir.async_delete_issue(self.hass, DOMAIN, self.issue_id)
 
     @callback
-    def _handle_failure(self, reason: str, status: int | None, retry_after: int | None = None) -> None:
+    def _handle_failure(
+        self, reason: str, status: int | None, retry_after: int | None = None
+    ) -> None:
         """רושם כשל ומאט: כל כשל רצוף מכפיל את ההמתנה (עד שעה), ו-Retry-After של השרת גובר."""
         self.last_error = reason
         self.last_status = status
+        if self.data:
+            # כשהריענון נכשל המאזינים מקבלים עדכון עם הנתונים הקודמים; בלי זה הכתבות החדשות שלהם היו מוכרזות שוב
+            self.data.new_entries = []
         self._failures += 1
-        backoff = min(self._base_interval * 2 ** (self._failures - 1), max(self._base_interval, BACKOFF_MAX))
+        backoff = min(
+            self._base_interval * 2 ** (self._failures - 1),
+            max(self._base_interval, BACKOFF_MAX),
+        )
         self.update_interval = max(backoff, timedelta(seconds=retry_after or 0))
         now = dt_util.utcnow()
         self._first_failure = self._first_failure or now
         # כתובת שנמחקה או אתר שחוסם לא יסתדרו לבד, אז מודיעים מיד
-        if reason in PERMANENT_ERRORS or now - self._first_failure >= FAILURE_ISSUE_AFTER:
+        if (
+            reason in PERMANENT_ERRORS
+            or now - self._first_failure >= FAILURE_ISSUE_AFTER
+        ):
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
                 self.issue_id,
                 is_fixable=True,
                 severity=ir.IssueSeverity.ERROR,
-                translation_key={"blocked": "feed_blocked", "refused": "feed_refused", "auth_required": "feed_blocked"}.get(
-                    reason, "feed_unreachable"
-                ),
-                translation_placeholders={"title": self.config_entry.title, "url": self.url, "status": str(status or "")},
+                translation_key={
+                    "blocked": "feed_blocked",
+                    "refused": "feed_refused",
+                    "auth_required": "feed_blocked",
+                }.get(reason, "feed_unreachable"),
+                translation_placeholders={
+                    "title": self.config_entry.title,
+                    "url": self.url,
+                    "status": str(status or ""),
+                },
                 data={"entry_id": self.config_entry.entry_id, "reason": reason},
             )
 
     def is_read(self, entry_id: str) -> bool:
+        """האם הכתבה סומנה כנקראה."""
         return entry_id in self._read
 
     @property
     def unread_count(self) -> int:
-        return sum(e["id"] not in self._read for e in self.data.entries) if self.data else 0
+        """מספר הכתבות בפיד שלא סומנו כנקראו."""
+        return (
+            sum(e["id"] not in self._read for e in self.data.entries)
+            if self.data
+            else 0
+        )
 
     @property
     def newest_published(self) -> datetime | None:
         """זמן הפרסום של הכתבה החדשה ביותר בפיד."""
-        times = [t for e in (self.data.entries if self.data else []) if (t := dt_util.parse_datetime(e["published"] or ""))]
+        times = [
+            t
+            for e in (self.data.entries if self.data else [])
+            if (t := dt_util.parse_datetime(e["published"] or ""))
+        ]
         return max(times, default=None)
 
     @callback
     def async_mark_read(self, entry_ids: list[str] | None, read: bool = True) -> None:
         """סימון כתבות כנקראו (או לא). None = כל הכתבות בפיד."""
-        ids = entry_ids if entry_ids is not None else [e["id"] for e in self.data.entries] if self.data else []
+        ids = (
+            entry_ids
+            if entry_ids is not None
+            else [e["id"] for e in self.data.entries]
+            if self.data
+            else []
+        )
         for entry_id in ids:
             if read:
-                self._read.pop(entry_id, None)  # הזזה לסוף, כדי שהחיתוך ישמור את האחרונים
+                self._read.pop(
+                    entry_id, None
+                )  # הזזה לסוף, כדי שהחיתוך ישמור את האחרונים
                 self._read[entry_id] = None
             else:
                 self._read.pop(entry_id, None)
+        keep_recent(self._read)
         if self.data:
             # הכתבות החדשות כבר הוכרזו; בלי זה המאזינים היו מכריזים עליהן שוב
             self.data.new_entries = []
@@ -379,20 +514,24 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
         self.async_update_listeners()
 
     @callback
-    def _schedule_save(self) -> None:
-        self._store.async_delay_save(self._store_payload, 30)
+    def _schedule_save(self, data: NewsFeedData | None = None) -> None:
+        payload = self._store_payload(data or self.data)
+        self._saved_at = dt_util.utcnow()
+        self._store.async_delay_save(lambda: payload, 30)
 
     @override
     async def async_shutdown(self) -> None:
         """שמירה מיידית בפריקה."""
         await super().async_shutdown()
         if self.data:
-            await self._store.async_save(self._store_payload())
+            await self._store.async_save(self._store_payload(self.data))
 
     @callback
     def async_notify(self) -> None:
         """הודעה למנויי WebSocket ושליחת אירועי bus לפריטים חדשים."""
-        async_dispatcher_send(self.hass, SIGNAL_UPDATED.format(self.config_entry.entry_id))
+        async_dispatcher_send(
+            self.hass, SIGNAL_UPDATED.format(self.config_entry.entry_id)
+        )
 
     @callback
     def fire_bus_events(self, event_entity_id: str | None) -> None:
@@ -414,7 +553,9 @@ class NewsCardCoordinator(DataUpdateCoordinator[NewsFeedData]):
 
 
 @callback
-def coordinators_for(hass: HomeAssistant, entity_ids: list[str]) -> dict[str, NewsCardCoordinator]:
+def coordinators_for(
+    hass: HomeAssistant, entity_ids: list[str]
+) -> dict[str, NewsCardCoordinator]:
     """ממפה ישויות news_card למתאם שלהן. זורק שגיאה מתורגמת על ישות לא תקינה."""
     registry = er.async_get(hass)
     result: dict[str, NewsCardCoordinator] = {}
@@ -445,14 +586,24 @@ def entry_ids_for_target(hass: HomeAssistant, target: dict[str, Any]) -> list[st
     registry = er.async_get(hass)
     ids: dict[str, None] = {}
     for entity_id in sorted(selected.referenced | selected.indirectly_referenced):
-        if (reg := registry.async_get(entity_id)) and reg.platform == DOMAIN and reg.config_entry_id:
+        if (
+            (reg := registry.async_get(entity_id))
+            and reg.platform == DOMAIN
+            and reg.config_entry_id
+        ):
             ids[reg.config_entry_id] = None
     return list(ids)
 
 
 @callback
-def loaded_coordinator(hass: HomeAssistant, entry_id: str) -> NewsCardCoordinator | None:
+def loaded_coordinator(
+    hass: HomeAssistant, entry_id: str
+) -> NewsCardCoordinator | None:
     """המתאם של פיד טעון שיש לו נתונים, או None."""
     entry = hass.config_entries.async_get_entry(entry_id)
     coordinator = getattr(entry, "runtime_data", None) if entry else None
-    return coordinator if isinstance(coordinator, NewsCardCoordinator) and coordinator.data else None
+    return (
+        coordinator
+        if isinstance(coordinator, NewsCardCoordinator) and coordinator.data
+        else None
+    )

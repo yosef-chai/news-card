@@ -1,13 +1,14 @@
 """הורדת פידים, דפים ותמונות עם מגבלות גודל וזמן ומיפוי שגיאות למפתחות תרגום."""
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+import ipaddress
 import re
+import socket
 import ssl
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
@@ -26,7 +27,10 @@ ACCEPT_FEED = (
 class FetchError(Exception):
     """כשל רשת. reason הוא מפתח תרגום; retry_after בשניות, כשהשרת ביקש להמתין."""
 
-    def __init__(self, reason: str, status: int | None = None, retry_after: int | None = None) -> None:
+    def __init__(
+        self, reason: str, status: int | None = None, retry_after: int | None = None
+    ) -> None:
+        """שומר את הסיבה, הסטטוס וזמן ההמתנה שהשרת ביקש."""
         super().__init__(f"{reason} ({status})" if status else reason)
         self.reason = reason
         self.status = status
@@ -36,6 +40,8 @@ class FetchError(Exception):
 # אתגר JavaScript של שירות הגנה (Cloudflare, DataDome, Imperva): רק דפדפן אמיתי עובר, גם עם User-Agent של דפדפן
 CHALLENGE_HEADERS = ("x-datadome", "x-iinfo")
 RETRY_AFTER_MAX = 24 * 3600
+MAX_REDIRECTS = 5
+REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 # סירובים שבהם User-Agent אחר יכול לעזור
 FALLBACK_REASONS = ("refused", "rate_limited")
@@ -64,10 +70,12 @@ def _retry_after(value: str | None) -> int | None:
     if not value:
         return None
     try:
-        seconds = int(value) if value.strip().isdigit() else int(
-            (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
+        seconds = (
+            int(value)
+            if value.strip().isdigit()
+            else int((parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds())
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return min(max(seconds, 0), RETRY_AFTER_MAX)
 
@@ -75,7 +83,9 @@ def _retry_after(value: str | None) -> int | None:
 def http_error(resp: aiohttp.ClientResponse) -> FetchError:
     """ממפה תשובת שגיאה לסיבה שאפשר להסביר למשתמש."""
     status = resp.status
-    challenge = resp.headers.get("cf-mitigated") == "challenge" or any(h in resp.headers for h in CHALLENGE_HEADERS)
+    challenge = resp.headers.get("cf-mitigated") == "challenge" or any(
+        h in resp.headers for h in CHALLENGE_HEADERS
+    )
     if challenge and status in (401, 403, 405, 429, 503):
         reason = "blocked"
     elif status in (403, 406):
@@ -107,6 +117,44 @@ class FetchResult:
     charset: str | None = None
 
 
+async def _async_resolve(host: str) -> list[str]:
+    """כתובות ה-IP של שם מארח."""
+    infos = await asyncio.get_running_loop().getaddrinfo(
+        host, None, type=socket.SOCK_STREAM
+    )
+    return [str(info[4][0]) for info in infos]
+
+
+async def async_check_public(url: str, allowed_host: str | None = None) -> None:
+    """זורק FetchError("not_allowed") לכתובת ברשת המקומית.
+
+    קישורים ותמונות מגיעים מתוכן הפיד, ובלי הבדיקה פיד זדוני יכול לגרום ל-Home Assistant
+    לשלוח בקשות לנתב או למכשירים בבית. המארח של הפיד עצמו מותר, כי המשתמש בחר בו.
+    """
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if not host:
+        raise FetchError("not_allowed")
+    if allowed_host and host == allowed_host.lower():
+        return
+    if host == "localhost" or host.endswith(
+        (".localhost", ".local", ".internal", ".home.arpa")
+    ):
+        raise FetchError("not_allowed")
+    try:
+        addresses = [str(ipaddress.ip_address(host))]
+    except ValueError:
+        try:
+            addresses = await _async_resolve(host)
+        except OSError as err:
+            raise FetchError("cannot_connect") from err
+    for address in addresses:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            raise FetchError("not_allowed")
+
+
 async def async_fetch(
     session: aiohttp.ClientSession,
     url: str,
@@ -118,8 +166,15 @@ async def async_fetch(
     truncate: bool = False,
     timeout: float = FETCH_TIMEOUT,
     user_agent: str | None = None,
+    stop_at: bytes | None = None,
+    public_only: bool = False,
+    allowed_host: str | None = None,
 ) -> FetchResult:
-    """הורדה עם תקרת גודל. truncate=True חותך במקום להיכשל (לדפי HTML)."""
+    """הורדה עם תקרת גודל. truncate=True חותך במקום להיכשל (לדפי HTML).
+
+    stop_at: מפסיקים לקרוא כשהטקסט מופיע (בלי הבדל אותיות), למשל </head> בדף כתבה.
+    public_only: רק כתובות ציבוריות, כולל בכל הפניה בדרך (לכתובות שמגיעות מתוכן הפיד).
+    """
     headers = {"User-Agent": user_agent or USER_AGENT, "Accept": accept}
     if etag:
         headers["If-None-Match"] = etag
@@ -127,31 +182,22 @@ async def async_fetch(
         headers["If-Modified-Since"] = modified
     try:
         async with asyncio.timeout(timeout):
-            async with session.get(url, headers=headers, allow_redirects=True) as resp:
-                if resp.status == 304:
-                    return FetchResult(304, None, None, etag, modified, str(resp.url))
-                if resp.status >= 400:
-                    raise http_error(resp)
-                length = int(resp.headers.get("Content-Length") or 0)
-                if length > max_bytes and not truncate:
-                    raise FetchError("too_large")
-                body = bytearray()
-                async for chunk in resp.content.iter_chunked(64 * 1024):
-                    body.extend(chunk)
-                    if len(body) > max_bytes:
-                        if truncate:
-                            del body[max_bytes:]
-                            break
-                        raise FetchError("too_large")
-                return FetchResult(
-                    resp.status,
-                    bytes(body),
-                    resp.content_type,
-                    resp.headers.get("ETag"),
-                    resp.headers.get("Last-Modified"),
-                    str(resp.url),
-                    resp.charset,
-                )
+            for _ in range(MAX_REDIRECTS + 1):
+                if public_only:
+                    await async_check_public(url, allowed_host)
+                async with session.get(
+                    url, headers=headers, allow_redirects=not public_only
+                ) as resp:
+                    if (
+                        public_only
+                        and resp.status in REDIRECT_STATUSES
+                        and (location := resp.headers.get("Location"))
+                    ):
+                        url = urljoin(str(resp.url), location)
+                        continue
+                    return await _async_read(
+                        resp, max_bytes, truncate, stop_at, etag, modified
+                    )
     except FetchError:
         raise
     except TimeoutError as err:
@@ -160,10 +206,50 @@ async def async_fetch(
         raise FetchError("ssl_error") from err
     except (aiohttp.ClientError, ValueError) as err:
         raise FetchError("cannot_connect") from err
+    raise FetchError("cannot_connect")  # יותר מדי הפניות
 
 
-_META = re.compile(r"<meta\b[^>]*>", re.I)
-_LINK = re.compile(r"<link\b[^>]*>", re.I)
+async def _async_read(
+    resp: aiohttp.ClientResponse,
+    max_bytes: int,
+    truncate: bool,
+    stop_at: bytes | None,
+    etag: str | None,
+    modified: str | None,
+) -> FetchResult:
+    if resp.status == 304:
+        return FetchResult(304, None, None, etag, modified, str(resp.url))
+    if resp.status >= 400:
+        raise http_error(resp)
+    length = int(resp.headers.get("Content-Length") or 0)
+    if length > max_bytes and not truncate:
+        raise FetchError("too_large")
+    body = bytearray()
+    marker = stop_at.lower() if stop_at else None
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        start = max(0, len(body) - len(marker or b""))
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            if truncate:
+                del body[max_bytes:]
+                break
+            raise FetchError("too_large")
+        # בודקים רק את החלק החדש (ועוד כמה בתים מהקודם, למקרה שהסימן נחתך בין שני חלקים)
+        if marker and marker in bytes(body[start:]).lower():
+            break
+    return FetchResult(
+        resp.status,
+        bytes(body),
+        resp.content_type,
+        resp.headers.get("ETag"),
+        resp.headers.get("Last-Modified"),
+        str(resp.url),
+        resp.charset,
+    )
+
+
+_META = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_LINK = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 _ATTR = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 
 
@@ -173,13 +259,33 @@ def find_page_image(html: str) -> str | None:
     for tag in _META.findall(html):
         attrs = {m[0].lower(): m[1] or m[2] for m in _ATTR.findall(tag)}
         key = (attrs.get("property") or attrs.get("name") or "").lower()
-        if key in ("og:image", "og:image:url", "og:image:secure_url", "twitter:image") and attrs.get("content"):
+        if key in (
+            "og:image",
+            "og:image:url",
+            "og:image:secure_url",
+            "twitter:image",
+        ) and attrs.get("content"):
             found.setdefault(key, attrs["content"])
     for tag in _LINK.findall(html):
         attrs = {m[0].lower(): m[1] or m[2] for m in _ATTR.findall(tag)}
         if attrs.get("rel", "").lower() == "image_src" and attrs.get("href"):
             found.setdefault("image_src", attrs["href"])
-    for key in ("og:image:secure_url", "og:image", "og:image:url", "twitter:image", "image_src"):
+    for key in (
+        "og:image:secure_url",
+        "og:image",
+        "og:image:url",
+        "twitter:image",
+        "image_src",
+    ):
         if key in found:
             return found[key]
     return None
+
+
+def extract_page_image(content: bytes, charset: str | None = None) -> str | None:
+    """פענוח דף שהורד וחיפוש תמונת השיתוף בו. חוסם (עד PAGE_MAX_BYTES), ולכן רץ ב-executor."""
+    try:
+        html = content.decode(charset or "utf-8", "replace")
+    except LookupError:  # קידוד לא מוכר בכותרת Content-Type
+        html = content.decode("utf-8", "replace")
+    return find_page_image(html)

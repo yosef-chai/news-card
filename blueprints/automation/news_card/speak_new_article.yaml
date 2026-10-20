@@ -84,6 +84,7 @@ conditions:
     before: !input end_time
 
 variables:
+  speakers: !input speakers
   prefix: !input prefix
   include_summary: !input include_summary
   # מעבר דרך JSON: ב-HA 2026.9 המפתחות של ישות אירוע הם enum, והמאפיינים היו מגיעים כמחרוזת
@@ -99,3 +100,10 @@ actions:
       message: >-
         {{ (prefix ~ '. ') if prefix }}{{ article.title }}
         {%- if include_summary and article.summary %}. {{ article.summary | truncate(300) }}{% endif %}
+  # tts.speak חוזר כשההשמעה מתחילה. מחכים שתסתיים, כדי שהכותרת הבאה בתור לא תקטע אותה
+  - delay:
+      seconds: 2
+  - wait_template: "{{ ([speakers] if speakers is string else speakers) | select('is_state', 'playing') | list | count == 0 }}"
+    timeout:
+      minutes: 2
+    continue_on_timeout: true

@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 
 import pytest
 
-from custom_components.news_card.client import find_page_image
+from custom_components.news_card import client
+from custom_components.news_card.client import (
+    FetchError,
+    async_check_public,
+    extract_page_image,
+    find_page_image,
+)
+from custom_components.news_card.const import STORE_ID_LIMIT
+from custom_components.news_card.coordinator import keep_recent
 from custom_components.news_card.feed import (
     FeedError,
     apply_first_seen,
@@ -16,13 +24,25 @@ from custom_components.news_card.feed import (
 from .conftest import fixture
 
 ALL = [
-    "jdn.xml", "ims.xml", "google.xml", "cnn.xml", "fox.xml", "emess.xml", "hmnews.xml",
-    "atom.xml", "rdf.xml", "jsonfeed.json", "podcast.xml", "youtube.xml", "bozo.xml",
+    "jdn.xml",
+    "ims.xml",
+    "google.xml",
+    "cnn.xml",
+    "fox.xml",
+    "emess.xml",
+    "hmnews.xml",
+    "atom.xml",
+    "rdf.xml",
+    "jsonfeed.json",
+    "podcast.xml",
+    "youtube.xml",
+    "bozo.xml",
 ]
 
 
 @pytest.mark.parametrize("name", ALL)
 def test_every_entry_is_complete(name: str) -> None:
+    """בכל פיד אמיתי לכל כתבה יש כותרת נקייה, קישור מלא ומזהה."""
     result = parse_feed(fixture(name), f"https://example.com/{name}")
     assert result.entries
     assert result.info["title"]
@@ -35,23 +55,31 @@ def test_every_entry_is_complete(name: str) -> None:
             assert entry["image"].startswith(("http://", "https://"))
 
 
-@pytest.mark.parametrize("name", ["jdn.xml", "cnn.xml", "fox.xml", "podcast.xml", "youtube.xml"])
+@pytest.mark.parametrize(
+    "name", ["jdn.xml", "cnn.xml", "fox.xml", "podcast.xml", "youtube.xml"]
+)
 def test_images_found_for_every_entry(name: str) -> None:
+    """בפידים שיש בהם תמונות נמצאת תמונה לכל כתבה."""
     entries = parse_feed(fixture(name), "https://example.com/").entries
     assert all(e["image"] for e in entries)
 
 
 @pytest.mark.parametrize("name", ["emess.xml", "hmnews.xml"])
 def test_images_from_content_html(name: str) -> None:
-    assert any(e["image"] for e in parse_feed(fixture(name), "https://example.com/").entries)
+    """תמונה נלקחת מה-HTML שבתוכן הכתבה."""
+    assert any(
+        e["image"] for e in parse_feed(fixture(name), "https://example.com/").entries
+    )
 
 
 def test_cnn_picks_largest_media() -> None:
+    """מבין כמה תמונות נבחרת הגדולה."""
     first = parse_feed(fixture("cnn.xml"), "http://rss.cnn.com/").entries[0]
     assert "super-169" in first["image"]
 
 
 def test_google_news_source_suffix() -> None:
+    """בגוגל חדשות שם המקור יורד מהכותרת ועובר לשדה המקור."""
     entries = parse_feed(fixture("google.xml"), "https://news.google.com/rss").entries
     assert all(e["source"] == "C14" for e in entries)
     assert not any(e["title"].endswith(" - C14") for e in entries)
@@ -59,6 +87,7 @@ def test_google_news_source_suffix() -> None:
 
 
 def test_ims_hebrew_text_with_line_breaks() -> None:
+    """טקסט עברי נשמר עם ירידות שורה ובלי תגיות."""
     entry = parse_feed(fixture("ims.xml"), "https://ims.gov.il/").entries[0]
     assert "תחזית" in entry["title"]
     assert "\n" in entry["summary"]
@@ -67,17 +96,20 @@ def test_ims_hebrew_text_with_line_breaks() -> None:
 
 
 def test_emess_leading_whitespace_encoding() -> None:
+    """רווח לפני הצהרת ה-XML לא משבש את הקידוד."""
     entry = parse_feed(fixture("emess.xml"), "https://www.emess.co.il/feed").entries[0]
     assert "×" not in entry["title"]
     assert entry["author"]
 
 
 def test_podcast_media_and_categories() -> None:
+    """בפודקאסט קובץ השמע נשמר כמדיה."""
     entry = parse_feed(fixture("podcast.xml"), "https://feeds.npr.org/").entries[0]
     assert entry["media"]["type"].startswith("audio/")
 
 
 def test_bozo_feed_fallbacks() -> None:
+    """פיד שבור: קישורים יחסיים מושלמים, פיקסל מעקב מדולג ושדות חסרים מקבלים ברירת מחדל."""
     entries = parse_feed(fixture("bozo.xml"), "https://broken.example/feed").entries
     first, second = entries
     assert first["link"] == "https://broken.example/relative/1"
@@ -88,12 +120,18 @@ def test_bozo_feed_fallbacks() -> None:
 
 
 def test_json_feed() -> None:
-    result = parse_feed(fixture("jsonfeed.json"), "https://www.jsonfeed.org/feed.json", "application/feed+json")
+    """JSON Feed נקרא עם כותרת ותאריכים."""
+    result = parse_feed(
+        fixture("jsonfeed.json"),
+        "https://www.jsonfeed.org/feed.json",
+        "application/feed+json",
+    )
     assert result.info["title"] == "JSON Feed"
     assert result.entries[0]["published"]
 
 
 def test_html_page_discovers_feeds() -> None:
+    """דף HTML אינו פיד, והפידים שהוא מצהיר עליהם מוחזרים."""
     with pytest.raises(FeedError) as err:
         parse_feed(fixture("page.html"), "https://www.jdn.co.il/", "text/html")
     assert err.value.reason == "not_a_feed"
@@ -103,15 +141,21 @@ def test_html_page_discovers_feeds() -> None:
 
 @pytest.mark.parametrize(
     ("content", "reason"),
-    [(b"not xml at all", "invalid_feed"), (b"{broken", "invalid_feed"), (b'{"a": 1}', "not_a_feed")],
+    [
+        (b"not xml at all", "invalid_feed"),
+        (b"{broken", "invalid_feed"),
+        (b'{"a": 1}', "not_a_feed"),
+    ],
 )
 def test_invalid_content(content: bytes, reason: str) -> None:
+    """תוכן שאינו פיד נדחה עם הסיבה המתאימה."""
     with pytest.raises(FeedError) as err:
         parse_feed(content, "https://example.com/")
     assert err.value.reason == reason
 
 
 def test_max_entries_and_sorting() -> None:
+    """מספר הכתבות מוגבל, והן ממוינות מהחדשה לישנה."""
     entries = parse_feed(fixture("google.xml"), "https://x/", max_entries=5).entries
     assert len(entries) == 5
     dates = [e["published"] for e in entries]
@@ -119,6 +163,7 @@ def test_max_entries_and_sorting() -> None:
 
 
 def test_first_seen_is_stable() -> None:
+    """כתבה בלי תאריך מקבלת את זמן הראייה הראשון, והוא לא משתנה בקריאה הבאה."""
     entries = parse_feed(fixture("bozo.xml"), "https://broken.example/").entries
     seen: dict[str, str] = {}
     apply_first_seen(entries, seen, datetime(2026, 1, 1, tzinfo=UTC))
@@ -129,11 +174,13 @@ def test_first_seen_is_stable() -> None:
 
 
 def test_html_to_text() -> None:
+    """HTML הופך לטקסט עם ירידות שורה, בלי סקריפטים."""
     assert html_to_text("<p>a&amp;b<br>c</p><script>x</script>") == "a&b\nc"
     assert html_to_text(None) == ""
 
 
 def test_discover_ignores_non_feeds() -> None:
+    """גילוי פידים מדלג על oEmbed ועל JSON שאינו פיד."""
     html = (
         '<link rel="alternate" type="application/json+oembed" href="/o"><link rel="alternate" type="application/atom+xml" href="/atom">'
         '<link rel="alternate" type="application/json" href="/wp-json/wp/v2/posts/1">'
@@ -168,6 +215,7 @@ def _rss(items: str, channel: str = "", ns: str = "") -> bytes:
 
 
 def test_double_escaped_html() -> None:
+    """HTML שעבר escape כפול מפוענח נכון בכותרת, בתקציר ובתמונה."""
     body = _rss(
         "<item><title>Q&amp;amp;A</title><link>https://a.b/1</link><description><![CDATA["
         "&lt;img src=&quot;https://a.b/i.jpg&quot;&gt;&lt;p&gt;Hi &amp;amp; bye&lt;/p&gt;]]></description></item>"
@@ -181,19 +229,29 @@ def test_double_escaped_html() -> None:
 @pytest.mark.parametrize(
     ("description", "summary"),
     [
-        ("<p>Body.</p><p>The post <a href='x'>X</a> first appeared on <a href='y'>Y</a>.</p>", "Body."),
+        (
+            "<p>Body.</p><p>The post <a href='x'>X</a> first appeared on <a href='y'>Y</a>.</p>",
+            "Body.",
+        ),
         ("<p>Body.</p><p>Read more of this story at Slashdot.</p>", "Body."),
         ("<p>Some text Read More</p>", "Some text…"),
         ("<p>Some text [&#8230;]</p><p>המשך קריאה</p>", "Some text…"),
-        ("<p>You can read more about it on our blog.</p>", "You can read more about it on our blog."),
+        (
+            "<p>You can read more about it on our blog.</p>",
+            "You can read more about it on our blog.",
+        ),
     ],
 )
 def test_summary_boilerplate(description: str, summary: str) -> None:
-    body = _rss(f"<item><title>t</title><link>https://a.b/1</link><description><![CDATA[{description}]]></description></item>")
+    """שורות קבועות כמו 'המשך קריאה' יורדות מסוף התקציר, ומשפט רגיל נשאר."""
+    body = _rss(
+        f"<item><title>t</title><link>https://a.b/1</link><description><![CDATA[{description}]]></description></item>"
+    )
     assert parse_feed(body, "https://a.b/feed").entries[0]["summary"] == summary
 
 
 def test_author_profile_url_and_long_title() -> None:
+    """כתובת פרופיל יורדת משם הכותב, וכותרת ארוכה נחתכת."""
     body = _rss(
         f"<item><title>{'word ' * 100}</title><link>https://a.b/1</link>"
         "<dc:creator>Duet ! (https://www.flickr.com/people/115338398@N03/)</dc:creator></item>"
@@ -208,18 +266,22 @@ def test_author_profile_url_and_long_title() -> None:
 
 
 def test_bing_news() -> None:
+    """בבינג חדשות הקישור האמיתי מחולץ מכתובת ההפניה, עם המקור והתמונה."""
     body = _rss(
-        '<item><title>t</title><link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2fsite.example%2fa%3fx%3d1&amp;c=1</link>'
+        "<item><title>t</title><link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2fsite.example%2fa%3fx%3d1&amp;c=1</link>"
         "<News:Source>Site</News:Source><News:Image>http://www.bing.com/th?id=ONUT.x&amp;pid=News</News:Image></item>",
         ns='xmlns:News="https://www.bing.com:443/news/search?q=x&amp;format=rss"',
     )
-    entry = parse_feed(body, "https://www.bing.com/news/search?q=x&format=rss").entries[0]
+    entry = parse_feed(body, "https://www.bing.com/news/search?q=x&format=rss").entries[
+        0
+    ]
     assert entry["link"] == "https://site.example/a?x=1"
     assert entry["source"] == "Site"
     assert entry["image"] == "http://www.bing.com/th?id=ONUT.x&pid=News"
 
 
 def test_podcast_episode_without_page_or_image() -> None:
+    """פרק בלי דף ובלי תמונה מקבל את קובץ השמע כקישור ואת תמונת הפודקאסט."""
     body = _rss(
         '<item><title>Ep 1</title><guid isPermaLink="false">ep1</guid>'
         '<enclosure url="https://cdn.a.b/ep1.mp3" length="1" type="audio/mpeg"/></item>',
@@ -235,21 +297,31 @@ def test_podcast_episode_without_page_or_image() -> None:
     ("extra", "image"),
     [
         # media:content בלי type ובלי סיומת (CDN) הוא תמונה; וידאו לא
-        ('<media:content url="https://cdn.a.b/photo/123"/>', "https://cdn.a.b/photo/123"),
+        (
+            '<media:content url="https://cdn.a.b/photo/123"/>',
+            "https://cdn.a.b/photo/123",
+        ),
         ('<media:content url="https://cdn.a.b/clip.mp4"/>', None),
         ('<media:content url="https://cdn.a.b/v" medium="video"/>', None),
         ('<itunes:image href="https://a.b/ep.jpg"/>', "https://a.b/ep.jpg"),
         ("<image><url>https://a.b/item.jpg</url></image>", "https://a.b/item.jpg"),
-        ('<enclosure url="https://a.b/e.png" length="0" type="image/png"/>', "https://a.b/e.png"),
+        (
+            '<enclosure url="https://a.b/e.png" length="0" type="image/png"/>',
+            "https://a.b/e.png",
+        ),
     ],
 )
 def test_item_image_sources(extra: str, image: str | None) -> None:
+    """תמונה נמצאת בכל המקומות המקובלים בכתבה, ווידאו לא נחשב תמונה."""
     ns = 'xmlns:media="http://search.yahoo.com/mrss/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"'
-    body = _rss(f"<item><title>t</title><link>https://a.b/1</link>{extra}</item>", ns=ns)
+    body = _rss(
+        f"<item><title>t</title><link>https://a.b/1</link>{extra}</item>", ns=ns
+    )
     assert parse_feed(body, "https://a.b/feed").entries[0]["image"] == image
 
 
 def test_page_with_unknown_charset() -> None:
+    """דף עם קידוד לא מוכר עדיין מגלה את הפידים שבו."""
     page = b'<html><head><link rel="alternate" type="application/rss+xml; charset=utf-8" href="/rss"></head></html>'
     with pytest.raises(FeedError) as err:
         parse_feed(page, "https://a.b/", "text/html", charset="x-bogus")
@@ -295,14 +367,21 @@ HEB_RSS = '<rss version="2.0"><channel><title>שלום</title><link>https://a.b/
         # הקידוד מגיע רק מהשרת
         (HEB_RSS.encode("cp1255"), "windows-1255"),
         # ההצהרה במסמך נכונה וברירת המחדל של השרת שגויה
-        (f'<?xml version="1.0" encoding="windows-1255"?>{HEB_RSS}'.encode("cp1255"), "iso-8859-1"),
+        (
+            f'<?xml version="1.0" encoding="windows-1255"?>{HEB_RSS}'.encode("cp1255"),
+            "iso-8859-1",
+        ),
         # ההצהרה שגויה (UTF-8) והשרת צודק
-        (f'<?xml version="1.0" encoding="utf-8"?>{HEB_RSS}'.encode("cp1255"), "windows-1255"),
+        (
+            f'<?xml version="1.0" encoding="utf-8"?>{HEB_RSS}'.encode("cp1255"),
+            "windows-1255",
+        ),
         # UTF-8 תקין גובר על הצהרה שגויה
         (f'<?xml version="1.0" encoding="windows-1255"?>{HEB_RSS}'.encode(), None),
     ],
 )
 def test_encoding(content: bytes, charset: str | None) -> None:
+    """קידוד עברי מזוהה נכון גם כשהשרת או ההצהרה במסמך שגויים."""
     result = parse_feed(content, "https://a.b/feed", "text/xml", charset=charset)
     assert result.info["title"] == "שלום"
     assert result.entries[0]["title"] == "כותרת"
@@ -314,15 +393,24 @@ def test_encoding(content: bytes, charset: str | None) -> None:
         (HEB_RSS.encode(), "text/html"),
         (HEB_RSS.encode(), "application/json"),
         (b"\xef\xbb\xbf\n\n" + HEB_RSS.encode(), None),
-        (b"<br />\n<b>Warning</b>: Cannot modify header information<br />\n" + HEB_RSS.encode(), "text/html"),
+        (
+            b"<br />\n<b>Warning</b>: Cannot modify header information<br />\n"
+            + HEB_RSS.encode(),
+            "text/html",
+        ),
         (b"<!-- <html> --><?xml version='1.0'?>" + HEB_RSS.encode(), None),
     ],
 )
 def test_detects_feed_by_content(content: bytes, content_type: str | None) -> None:
-    assert parse_feed(content, "https://a.b/feed", content_type).entries[0]["title"] == "כותרת"
+    """פיד מזוהה לפי התוכן גם עם סוג תוכן שגוי, BOM או אזהרות PHP בהתחלה."""
+    assert (
+        parse_feed(content, "https://a.b/feed", content_type).entries[0]["title"]
+        == "כותרת"
+    )
 
 
 def test_json_feed_with_bom_and_wrong_type() -> None:
+    """JSON Feed עם BOM וסוג תוכן שגוי נקרא, והכותב נלקח מהפיד."""
     body = b'\xef\xbb\xbf {"version": "https://jsonfeed.org/version/1.1", "title": "J", "authors": [{"name": "Feed Author"}],'
     body += b'"items": [{"id": "1", "url": "https://a.b/1", "title": "t"}]}'
     entry = parse_feed(body, "https://a.b/feed.json", "text/plain").entries[0]
@@ -331,14 +419,18 @@ def test_json_feed_with_bom_and_wrong_type() -> None:
 
 
 def test_xhtml_page_is_discovered() -> None:
+    """דף XHTML מזוהה כדף ולא כפיד, והפידים שבו מוחזרים."""
     page = b'<?xml version="1.0"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>'
-    page += b'<link rel="alternate" type="application/rss+xml" href="/rss"/></head></html>'
+    page += (
+        b'<link rel="alternate" type="application/rss+xml" href="/rss"/></head></html>'
+    )
     with pytest.raises(FeedError) as err:
         parse_feed(page, "https://a.b/", "application/xhtml+xml")
     assert err.value.discovered == [("https://a.b/rss", "https://a.b/rss")]
 
 
 def test_authors_and_categories() -> None:
+    """שם הכותב בלי האימייל, כמה כותבים מצורפים, וקטגוריות כפולות או ריקות יורדות."""
     body = b"""<rss version="2.0"><channel><title>T</title><link>https://a.b/</link>
     <item><title>1</title><link>https://a.b/1</link><author>bob@a.b (Bob Smith)</author>
       <category>News</category><category>News</category></item>
@@ -358,7 +450,64 @@ def test_authors_and_categories() -> None:
 
 
 def test_find_page_image() -> None:
+    """og:image קודם ל-twitter:image, ו-image_src משמש גיבוי."""
     html = '<meta name="twitter:image" content="/t.jpg"><meta property="og:image" content="https://a/og.jpg">'
     assert find_page_image(html) == "https://a/og.jpg"
     assert find_page_image('<link rel="image_src" href="/i.png">') == "/i.png"
     assert find_page_image("<p>nothing</p>") is None
+
+
+def test_extract_page_image() -> None:
+    """תמונת הדף נקראת בקידוד שהשרת מסר, ובקידוד לא מוכר נופלים ל-UTF-8."""
+    page = '<meta property="og:image" content="/תמונה.jpg">'
+    assert (
+        extract_page_image(page.encode("windows-1255"), "windows-1255") == "/תמונה.jpg"
+    )
+    assert extract_page_image(page.encode()) == "/תמונה.jpg"
+    # קידוד לא מוכר בכותרת: נופלים ל-UTF-8
+    assert extract_page_image(page.encode(), "no-such-charset") == "/תמונה.jpg"
+
+
+async def test_check_public(monkeypatch: pytest.MonkeyPatch) -> None:
+    """רק כתובות ציבוריות מותרות, ושם שמצביע גם לכתובת פנימית נחסם."""
+    hosts = {
+        "public.test": ["93.184.216.34"],
+        "rebind.test": ["93.184.216.34", "10.0.0.1"],
+        "mapped.test": ["::ffff:192.168.1.1"],
+    }
+
+    async def resolve(host: str) -> list[str]:
+        if host not in hosts:
+            raise OSError(host)
+        return hosts[host]
+
+    monkeypatch.setattr(client, "_async_resolve", resolve)
+    await async_check_public("https://public.test/x")
+    await async_check_public("https://8.8.8.8/x")
+    # הפיד עצמו ברשת המקומית: דפי הכתבות שלו מותרים
+    await async_check_public("http://192.168.1.1/item", allowed_host="192.168.1.1")
+    for url in (
+        "http://192.168.1.1/",
+        "http://127.0.0.1:8123/api",
+        "http://[::1]/",
+        "http://169.254.169.254/latest/meta-data",
+        "http://localhost/",
+        "http://printer.local/",
+        "https://rebind.test/",
+        "https://mapped.test/",
+        "file:///etc/passwd",
+    ):
+        with pytest.raises(FetchError, match="not_allowed"):
+            await async_check_public(url)
+    with pytest.raises(FetchError, match="cannot_connect"):
+        await async_check_public("https://missing.test/")
+
+
+def test_keep_recent() -> None:
+    """מזהים ישנים נמחקים מעבר לתקרה, חוץ ממה שעדיין בפיד."""
+    store = {str(i): i for i in range(STORE_ID_LIMIT + 5)}
+    keep_recent(store, ["0"])  # עדיין בפיד: נשמר למרות שהוא הישן ביותר
+    assert len(store) == STORE_ID_LIMIT
+    assert "0" in store
+    assert "1" not in store
+    assert list(store)[-1] == "0"

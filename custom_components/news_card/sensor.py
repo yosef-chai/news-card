@@ -1,7 +1,5 @@
 """חיישנים: הכתבה האחרונה, כתבות שלא נקראו, מספר כתבות, זמן עדכון אחרון."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,7 +42,9 @@ def _last_update(data: NewsFeedData) -> datetime | None:
 
 
 SENSORS = (
-    NewsSensorDescription(key="latest_article", value_fn=lambda c: _latest_title(c.data)),
+    NewsSensorDescription(
+        key="latest_article", value_fn=lambda c: _latest_title(c.data)
+    ),
     NewsSensorDescription(
         key="unread",
         state_class=SensorStateClass.MEASUREMENT,
@@ -66,8 +66,11 @@ SENSORS = (
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
+    hass: HomeAssistant,
+    entry: NewsCardConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    """החיישנים של הפיד."""
     coordinator = entry.runtime_data
     async_add_entities(NewsSensor(coordinator, d) for d in SENSORS)
 
@@ -77,9 +80,14 @@ class NewsSensor(NewsCardEntity, SensorEntity):
 
     entity_description: NewsSensorDescription
     # התקציר והקישור משתנים כל הזמן ואין בהם ערך היסטורי
-    _unrecorded_attributes = frozenset({"link", "image", "summary", "source", "published", "entry_id"})
+    _unrecorded_attributes = frozenset(
+        {"link", "image", "summary", "source", "published", "entry_id"}
+    )
 
-    def __init__(self, coordinator: NewsCardCoordinator, description: NewsSensorDescription) -> None:
+    def __init__(
+        self, coordinator: NewsCardCoordinator, description: NewsSensorDescription
+    ) -> None:
+        """חיישן לפי התיאור שלו."""
         super().__init__(coordinator, description.key)
         self.entity_description = description
 
@@ -91,7 +99,10 @@ class NewsSensor(NewsCardEntity, SensorEntity):
     @property
     @override
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self.entity_description.key != "latest_article" or not self.coordinator.data.entries:
+        if (
+            self.entity_description.key != "latest_article"
+            or not self.coordinator.data.entries
+        ):
             return None
         latest = self.coordinator.data.entries[0]
         return {
@@ -106,6 +117,9 @@ class NewsSensor(NewsCardEntity, SensorEntity):
     @property
     @override
     def entity_picture(self) -> str | None:
-        if self.entity_description.key != "latest_article" or not self.coordinator.data.entries:
+        if (
+            self.entity_description.key != "latest_article"
+            or not self.coordinator.data.entries
+        ):
             return None
         return self.coordinator.data.entries[0]["image"]

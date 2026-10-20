@@ -1,11 +1,9 @@
 """WebSocket API לכרטיס: מנוי שדוחף נתונים בכל עדכון, עם נתיבי תמונה חתומים."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
 
-import probatio as vol
+import probatio
 
 from homeassistant.components import websocket_api
 from homeassistant.components.http.auth import async_sign_path
@@ -22,7 +20,9 @@ from .feed import make_id
 type Signer = Callable[[str], str]
 
 
-def feed_payload(coordinator: NewsCardCoordinator, signer: Signer | None = None) -> dict[str, Any]:
+def feed_payload(
+    coordinator: NewsCardCoordinator, signer: Signer | None = None
+) -> dict[str, Any]:
     """המבנה האחיד של פיד אחד (משותף לפעולה ול-WebSocket)."""
     data = coordinator.data
     entries = [{**e, "read": coordinator.is_read(e["id"])} for e in data.entries]
@@ -31,7 +31,9 @@ def feed_payload(coordinator: NewsCardCoordinator, signer: Signer | None = None)
         for entry in entries:
             if entry["image"]:
                 entry["image_proxy"] = signer(
-                    IMAGE_PROXY_URL.format(entry_id=entry_id, image_id=make_id(entry["image"]))
+                    IMAGE_PROXY_URL.format(
+                        entry_id=entry_id, image_id=make_id(entry["image"])
+                    )
                 )
     return {
         "title": coordinator.config_entry.title,
@@ -43,31 +45,52 @@ def feed_payload(coordinator: NewsCardCoordinator, signer: Signer | None = None)
     }
 
 
+SIGNER_CACHE_MAX = 500
+
+
 def _make_signer(hass: HomeAssistant, refresh_token_id: str | None) -> Signer:
     """חתימה עם מטמון: אותה כתובת חתומה חוזרת כדי שהדפדפן ישמור את התמונה במטמון."""
     cache: dict[str, tuple[str, Any]] = {}
 
     def sign(path: str) -> str:
         now = dt_util.utcnow()
-        hit = cache.get(path)
-        if hit and hit[1] - now > SIGNED_PATH_TTL / 2:
-            return hit[0]
-        signed = async_sign_path(hass, path, SIGNED_PATH_TTL, refresh_token_id=refresh_token_id)
-        cache[path] = (signed, now + SIGNED_PATH_TTL)
-        return signed
+        hit = cache.pop(path, None)
+        if not hit or hit[1] - now <= SIGNED_PATH_TTL / 2:
+            hit = (
+                async_sign_path(
+                    hass, path, SIGNED_PATH_TTL, refresh_token_id=refresh_token_id
+                ),
+                now + SIGNED_PATH_TTL,
+            )
+        cache[path] = hit  # בסוף הסדר: הישנים ביותר נמחקים ראשונים
+        while len(cache) > SIGNER_CACHE_MAX:
+            del cache[next(iter(cache))]
+        return hit[0]
 
     return sign
 
 
+def _comparable(payload: dict[str, Any]) -> dict[str, Any]:
+    """התוכן שמשפיע על הכרטיס. זמן הבדיקה האחרונה מוצג רק כשהפיד לא מתעדכן."""
+    return (
+        payload
+        if payload["stale"]
+        else {k: v for k, v in payload.items() if k != "last_success"}
+    )
+
+
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
+    """רישום פקודת המנוי של הכרטיס."""
     websocket_api.async_register_command(hass, ws_subscribe)
 
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "news_card/subscribe",
-        vol.Required("entity_ids"): vol.All(cv.ensure_list, [cv.entity_id]),
+        probatio.Required("type"): "news_card/subscribe",
+        probatio.Required("entity_ids"): probatio.All(
+            probatio.EnsureList(), [cv.entity_id]
+        ),
     }
 )
 @callback
@@ -75,21 +98,32 @@ def ws_subscribe(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """מנוי לפידים. כל הודעה: {"feeds": {entity_id: payload | {"error": key}}}."""
-    entity_ids: list[str] = msg["entity_ids"]
+    entity_ids: list[str] = list(dict.fromkeys(msg["entity_ids"]))
     signer = _make_signer(hass, connection.refresh_token_id)
     registry = er.async_get(hass)
+    sent: dict[str, Any] = {}  # מה שנשלח אחרון לכל ישות, כדי לא לשלוח שוב את אותו תוכן
 
     @callback
-    def send(targets: list[str]) -> None:
+    def send(targets: list[str], force: bool = False) -> None:
         feeds: dict[str, Any] = {}
+        built: dict[int, dict[str, Any]] = {}  # חיישן ואירוע של אותו פיד: בונים פעם אחת
         for entity_id in targets:
             try:
                 coordinator = coordinators_for(hass, [entity_id])[entity_id]
             except ServiceValidationError as err:
-                feeds[entity_id] = {"error": err.translation_key}
-                continue
-            feeds[entity_id] = feed_payload(coordinator, signer)
-        connection.send_message(websocket_api.event_message(msg["id"], {"feeds": feeds}))
+                payload: dict[str, Any] = {"error": err.translation_key}
+            else:
+                if id(coordinator) not in built:
+                    built[id(coordinator)] = feed_payload(coordinator, signer)
+                payload = built[id(coordinator)]
+            comparable = _comparable(payload) if "entries" in payload else payload
+            if force or sent.get(entity_id) != comparable:
+                sent[entity_id] = comparable
+                feeds[entity_id] = payload
+        if feeds:
+            connection.send_message(
+                websocket_api.event_message(msg["id"], {"feeds": feeds})
+            )
 
     by_entry: dict[str, list[str]] = {}
     for entity_id in entity_ids:
@@ -112,4 +146,4 @@ def ws_subscribe(
 
     connection.subscriptions[msg["id"]] = unsubscribe
     connection.send_result(msg["id"])
-    send(entity_ids)
+    send(entity_ids, force=True)

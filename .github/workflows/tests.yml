@@ -37,6 +37,11 @@ jobs:
       - name: Strict typing
         if: matrix.latest
         run: mypy
+      - name: Lint (ruff, the Home Assistant core rules)
+        if: matrix.latest
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
       - name: Card syntax
         if: matrix.latest
         run: node --check custom_components/news_card/frontend/news-card.js

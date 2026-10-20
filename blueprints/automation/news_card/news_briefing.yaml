@@ -131,15 +131,21 @@ variables:
   mark_read: !input mark_read
 
 actions:
+  # פיד שלא נטען (מושבת, או בטעינה מחדש) לא מפיל את כל הסיכום: מדלגים עליו
+  - variables:
+      live_feeds: "{{ expand(feeds) | rejectattr('state', 'eq', 'unavailable') | map(attribute='entity_id') | list }}"
+  - condition: template
+    value_template: "{{ live_feeds | count > 0 }}"
   - action: news_card.get_entries
+    continue_on_error: true
     data:
-      entity_id: "{{ feeds }}"
+      entity_id: "{{ live_feeds }}"
       since: "{{ (now() - timedelta(hours=hours | int)).isoformat() }}"
     response_variable: news
   - variables:
       articles: >-
         {% set ns = namespace(items=[]) %}
-        {% for feed in news.values() %}{% set ns.items = ns.items + feed.entries %}{% endfor %}
+        {% for feed in (news if news is defined and news is mapping else {}).values() %}{% set ns.items = ns.items + (feed.entries or []) %}{% endfor %}
         {{ (ns.items | sort(attribute='published', reverse=true))[: count | int] }}
   - condition: template
     value_template: "{{ articles | count > 0 }}"
@@ -147,8 +153,9 @@ actions:
       - condition: template
         value_template: "{{ notify_device != '' }}"
     then:
-      # השירות של האפליקציה נקרא לפי שם הטלפון; פעולת מכשיר לא מאפשרת להשאיר את הטלפון ריק
-      - action: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
+      # פעולת מכשיר נבדקת בטעינה גם בתוך if, וטלפון ריק הופך את האוטומציה ללא תקינה.
+      # לכן קוראים לשירות של האפליקציה, ובונים את השם כמו HA: slugify על "mobile_app_<שם>" כולו
+      - action: "notify.{{ ('mobile_app_' ~ device_attr(notify_device, 'name')) | slugify }}"
         data:
           title: "{{ title }}"
           message: >-
@@ -172,6 +179,7 @@ actions:
         value_template: "{{ mark_read }}"
     then:
       - action: news_card.mark_read
+        continue_on_error: true
         data:
-          entity_id: "{{ feeds }}"
+          entity_id: "{{ live_feeds }}"
           article_id: "{{ articles | map(attribute='id') | list }}"

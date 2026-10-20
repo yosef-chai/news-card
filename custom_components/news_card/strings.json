@@ -205,7 +205,8 @@
           "server_error": "The site is having trouble ({status}). Try again later.",
           "refused": "The site refused the request ({status}). You can try a different User-Agent in the feed options.",
           "still_refused": "The site still refuses ({status}), even with the User-Agent from the feed options.",
-          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters.",
+          "already_configured": "That address belongs to another feed you already have."
         },
         "abort": {
           "entry_removed": "The feed was removed."
@@ -243,7 +244,8 @@
           "server_error": "The site is having trouble ({status}). Try again later.",
           "refused": "The site refused the request ({status}). You can try a different User-Agent in the feed options.",
           "still_refused": "The site still refuses ({status}), even with the User-Agent from the feed options.",
-          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters.",
+          "already_configured": "That address belongs to another feed you already have."
         },
         "abort": {
           "entry_removed": "The feed was removed."
@@ -283,7 +285,8 @@
           "server_error": "The site is having trouble ({status}). Try again later.",
           "refused": "The site refused the request ({status}). Choose a User-Agent and try again.",
           "still_refused": "The site still refuses ({status}). Try another User-Agent. If nothing works, the site lets only real browsers in.",
-          "invalid_user_agent": "A User-Agent is one line of up to 512 characters."
+          "invalid_user_agent": "A User-Agent is one line of up to 512 characters.",
+          "already_configured": "That address belongs to another feed you already have."
         },
         "abort": {
           "entry_removed": "The feed was removed."

@@ -1,7 +1,5 @@
 """ישות בסיס: מכשיר שירות אחד לכל פיד."""
 
-from __future__ import annotations
-
 from urllib.parse import urlparse
 
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -17,6 +15,7 @@ class NewsCardEntity(CoordinatorEntity[NewsCardCoordinator]):
     _attr_has_entity_name = True
 
     def __init__(self, coordinator: NewsCardCoordinator, key: str) -> None:
+        """מזהה ייחודי, מפתח תרגום ומכשיר השירות של הפיד."""
         super().__init__(coordinator)
         entry = coordinator.config_entry
         self._attr_translation_key = key

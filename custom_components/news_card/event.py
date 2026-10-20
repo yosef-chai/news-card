@@ -1,7 +1,5 @@
 """ישות אירוע: כתבה חדשה / התאמת מילת מפתח."""
 
-from __future__ import annotations
-
 from typing import override
 
 from homeassistant.components.event import EventEntity
@@ -16,8 +14,11 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: NewsCardConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
+    hass: HomeAssistant,
+    entry: NewsCardConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    """ישות האירוע של הפיד."""
     async_add_entities([NewsEvent(entry.runtime_data)])
 
 
@@ -25,8 +26,26 @@ class NewsEvent(NewsCardEntity, EventEntity):
     """נורה פעם אחת לכל כתבה חדשה. נתוני הכתבה זמינים ב-trigger.to_state.attributes."""
 
     _attr_event_types = [EVENT_TYPE_NEW, EVENT_TYPE_KEYWORD]
+    # כל כתבה היא מצב חדש; בלי זה התקציר, הקישור והתמונה נכתבים למסד הנתונים בכל אירוע.
+    # הטריגרים קוראים את המצב החי, ולכן לא מושפעים
+    _unrecorded_attributes = frozenset(
+        {
+            "id",
+            "link",
+            "summary",
+            "published",
+            "published_estimated",
+            "author",
+            "source",
+            "categories",
+            "image",
+            "image_proxy",
+            "media",
+        }
+    )
 
     def __init__(self, coordinator: NewsCardCoordinator) -> None:
+        """ישות אירוע לכתבות החדשות של הפיד."""
         super().__init__(coordinator, "new_article")
 
     @override
@@ -38,6 +57,8 @@ class NewsEvent(NewsCardEntity, EventEntity):
             self._trigger_event(EVENT_TYPE_NEW, attrs)
             self.async_write_ha_state()
             if matched := match_keywords(entry, self.coordinator.keywords):
-                self._trigger_event(EVENT_TYPE_KEYWORD, {**attrs, "matched_keywords": matched})
+                self._trigger_event(
+                    EVENT_TYPE_KEYWORD, {**attrs, "matched_keywords": matched}
+                )
                 self.async_write_ha_state()
         super()._handle_coordinator_update()

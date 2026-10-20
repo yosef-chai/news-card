@@ -1,13 +1,12 @@
 """News Card: פידי חדשות (RSS / Atom / JSON Feed) ללוח המחוונים ולאוטומציות."""
 
-from __future__ import annotations
-
+import asyncio
 from datetime import datetime
 import logging
 from pathlib import Path
 from typing import Any
 
-import probatio as vol
+import probatio
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
@@ -20,20 +19,25 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
+from .alerts import async_register_services, async_setup_alerts
 from .const import CARD_FILE, DOMAIN, STATIC_URL, STORAGE_VERSION
 from .coordinator import (
     NewsCardConfigEntry,
     NewsCardCoordinator,
     coordinators_for,
+    issue_id_for,
     match_keywords,
 )
-from .alerts import async_register_services, async_setup_alerts
 from .image_proxy import NewsCardImageView
 from .websocket import async_register_websocket, feed_payload
 
@@ -46,19 +50,23 @@ SERVICE_GET_ENTRIES = "get_entries"
 SERVICE_REFRESH = "refresh"
 SERVICE_MARK_READ = "mark_read"
 
-GET_ENTRIES_SCHEMA = vol.Schema(
+GET_ENTRIES_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-        vol.Optional("keyword"): cv.string,
-        vol.Optional("since"): cv.datetime,
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        probatio.Optional("limit"): probatio.All(
+            probatio.Coerce(int), probatio.Range(min=1, max=100)
+        ),
+        probatio.Optional("keyword"): cv.string,
+        probatio.Optional("since"): cv.datetime,
     }
 )
-REFRESH_SCHEMA = vol.Schema({vol.Required(ATTR_ENTITY_ID): cv.entity_ids})
-MARK_READ_SCHEMA = vol.Schema(
+REFRESH_SCHEMA = probatio.Schema({probatio.Required(ATTR_ENTITY_ID): cv.entity_ids})
+MARK_READ_SCHEMA = probatio.Schema(
     {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional("article_id"): vol.All(cv.ensure_list, [cv.string]),
+        probatio.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        probatio.Optional("article_id"): probatio.All(
+            probatio.EnsureList(), [cv.string]
+        ),
     }
 )
 
@@ -72,8 +80,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         schema=GET_ENTRIES_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
-    hass.services.async_register(DOMAIN, SERVICE_REFRESH, _async_refresh, schema=REFRESH_SCHEMA)
-    hass.services.async_register(DOMAIN, SERVICE_MARK_READ, _async_mark_read, schema=MARK_READ_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH, _async_refresh, schema=REFRESH_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_MARK_READ, _async_mark_read, schema=MARK_READ_SCHEMA
+    )
     async_register_services(hass)
     async_register_websocket(hass)
     hass.http.register_view(NewsCardImageView(hass))
@@ -82,7 +94,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         hass.data[f"{DOMAIN}_frontend"] = True
         integration = await async_get_integration(hass, DOMAIN)
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), True)]
+            [
+                StaticPathConfig(
+                    STATIC_URL, str(Path(__file__).parent / "frontend"), True
+                )
+            ]
         )
         add_extra_js_url(hass, f"{STATIC_URL}/{CARD_FILE}?v={integration.version}")
     return True
@@ -91,10 +107,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: NewsCardConfigEntry) -> bool:
     """הקמת פיד."""
     coordinator = NewsCardCoordinator(hass, entry)
-    if await coordinator.async_load():
-        # יש עותק שמור: עולים מיד עם נתונים ישנים גם אם האתר לא זמין כרגע
-        await coordinator.async_refresh()
-    else:
+    cached = await coordinator.async_load()
+    if not cached:
         await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
 
@@ -112,6 +126,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NewsCardConfigEntry) -> 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coordinator.async_notify()
+    if cached:
+        # יש עותק שמור: עולים מיד בלי לחכות לאתר. הריענון רץ אחרי שההתראות והישויות מחוברות,
+        # כדי שכתבה שהתפרסמה בזמן טעינה מחדש לא תסומן כמוכרזת בלי שנשלחה
+        entry.async_create_background_task(
+            hass, coordinator.async_refresh(), f"{DOMAIN} first refresh {entry.title}"
+        )
     return True
 
 
@@ -125,8 +145,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: NewsCardConfigEntry) ->
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: NewsCardConfigEntry) -> None:
-    """מחיקת המצב השמור כשהפיד נמחק."""
+    """מחיקת המצב השמור והודעת התיקון כשהפיד נמחק."""
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}").async_remove()
+    ir.async_delete_issue(hass, DOMAIN, issue_id_for(entry.entry_id))
 
 
 async def _async_get_entries(call: ServiceCall) -> ServiceResponse:
@@ -137,7 +158,9 @@ async def _async_get_entries(call: ServiceCall) -> ServiceResponse:
     if since and since.tzinfo is None:
         since = since.replace(tzinfo=dt_util.get_default_time_zone())
     response: dict[str, Any] = {}
-    for entity_id, coordinator in coordinators_for(call.hass, call.data[ATTR_ENTITY_ID]).items():
+    for entity_id, coordinator in coordinators_for(
+        call.hass, call.data[ATTR_ENTITY_ID]
+    ).items():
         payload = feed_payload(coordinator)
         entries = payload["entries"]
         if keyword:
@@ -146,7 +169,8 @@ async def _async_get_entries(call: ServiceCall) -> ServiceResponse:
             entries = [
                 e
                 for e in entries
-                if (parsed := dt_util.parse_datetime(e["published"] or "")) and parsed >= since
+                if (parsed := dt_util.parse_datetime(e["published"] or ""))
+                and parsed >= since
             ]
         payload["entries"] = entries[:limit] if limit else entries
         response[entity_id] = payload
@@ -154,22 +178,28 @@ async def _async_get_entries(call: ServiceCall) -> ServiceResponse:
 
 
 async def _async_refresh(call: ServiceCall) -> None:
-    """ריענון מיידי."""
-    for coordinator in coordinators_for(call.hass, call.data[ATTR_ENTITY_ID]).values():
-        await coordinator.async_refresh()
-        if not coordinator.last_update_success:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="refresh_failed",
-                translation_placeholders={
-                    "title": coordinator.config_entry.title,
-                    "error": coordinator.last_error or "unknown",
-                },
-            )
+    """ריענון מיידי, כל פיד פעם אחת ובמקביל. שגיאה אחת בסוף עם כל הפידים שנכשלו."""
+    coordinators = list(
+        dict.fromkeys(coordinators_for(call.hass, call.data[ATTR_ENTITY_ID]).values())
+    )
+    await asyncio.gather(*(c.async_refresh() for c in coordinators))
+    if failed := [c for c in coordinators if not c.last_update_success]:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="refresh_failed",
+            translation_placeholders={
+                "title": ", ".join(c.config_entry.title for c in failed),
+                "error": ", ".join(
+                    dict.fromkeys(c.last_error or "unknown" for c in failed)
+                ),
+            },
+        )
 
 
 async def _async_mark_read(call: ServiceCall) -> None:
     """סימון כתבות כנקראו. בלי article_id: כל הכתבות בפיד."""
     article_ids: list[str] | None = call.data.get("article_id")
-    for coordinator in set(coordinators_for(call.hass, call.data[ATTR_ENTITY_ID]).values()):
+    for coordinator in set(
+        coordinators_for(call.hass, call.data[ATTR_ENTITY_ID]).values()
+    ):
         coordinator.async_mark_read(article_ids)

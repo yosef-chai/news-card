@@ -1,11 +1,9 @@
 """טריגרים: "כתבה חדשה" (עם מילות מפתח שמקלידים באוטומציה) ו"אין כתבות חדשות" (פיד שהפסיק להתעדכן)."""
 
-from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import Any, cast, override
 
-import probatio as vol
+import probatio
 
 from homeassistant.components.event import ATTR_EVENT_TYPE, DOMAIN as EVENT_DOMAIN
 from homeassistant.const import CONF_FOR, CONF_OPTIONS, CONF_TARGET
@@ -23,13 +21,18 @@ from homeassistant.helpers.trigger import (
     TriggerNotTriggeredReporter,
 )
 from homeassistant.helpers.typing import ConfigType
-
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_KEYWORDS, DOMAIN, EVENT_TYPE_NEW, SIGNAL_UPDATED
 from .coordinator import entry_ids_for_target, loaded_coordinator, match_keywords
 
-OPTIONS_SCHEMA = vol.Schema({vol.Optional(CONF_KEYWORDS, default=[]): vol.All(cv.ensure_list, [cv.string])})
+OPTIONS_SCHEMA = probatio.Schema(
+    {
+        probatio.Optional(CONF_KEYWORDS, default=[]): probatio.All(
+            probatio.EnsureList(), [cv.string]
+        )
+    }
+)
 
 
 class NewArticleTrigger(StatelessEntityTriggerBase):
@@ -39,15 +42,22 @@ class NewArticleTrigger(StatelessEntityTriggerBase):
 
     @override
     @classmethod
-    async def async_validate_config(cls, hass: HomeAssistant, config: ConfigType) -> ConfigType:
+    async def async_validate_config(
+        cls, hass: HomeAssistant, config: ConfigType
+    ) -> ConfigType:
         # היעד נבדק בסכמה של HA, האפשרויות שלנו בנפרד
         options = OPTIONS_SCHEMA(config.get(CONF_OPTIONS) or {})
         config = await super().async_validate_config(hass, {**config, CONF_OPTIONS: {}})
         return {**config, CONF_OPTIONS: options}
 
     def __init__(self, hass: HomeAssistant, config: TriggerConfig) -> None:
+        """מילות המפתח מההגדרות."""
         super().__init__(hass, config)
-        self._keywords = [k.strip().casefold() for k in self._options.get(CONF_KEYWORDS, []) if k.strip()]
+        self._keywords = [
+            k.strip().casefold()
+            for k in self._options.get(CONF_KEYWORDS, [])
+            if k.strip()
+        ]
 
     @override
     def entity_filter(self, entities: set[str]) -> set[str]:
@@ -60,20 +70,30 @@ class NewArticleTrigger(StatelessEntityTriggerBase):
         }
 
     @override
-    def is_valid_state(self, state: State, report_not_triggered: NotTriggeredReasonReporter) -> bool:
+    def is_valid_state(
+        self, state: State, report_not_triggered: NotTriggeredReasonReporter
+    ) -> bool:
         if state.attributes.get(ATTR_EVENT_TYPE) != EVENT_TYPE_NEW:
             return False
         if not self._keywords:
             return True
         attrs = state.attributes
-        return bool(match_keywords({"title": attrs.get("title") or "", "summary": attrs.get("summary") or ""}, self._keywords))
+        return bool(
+            match_keywords(
+                {
+                    "title": attrs.get("title") or "",
+                    "summary": attrs.get("summary") or "",
+                },
+                self._keywords,
+            )
+        )
 
 
-NO_NEW_ARTICLES_SCHEMA = vol.Schema(
+NO_NEW_ARTICLES_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_TARGET): cv.TARGET_FIELDS,
-        vol.Optional(CONF_OPTIONS, default={}): {
-            vol.Optional(CONF_FOR, default={"hours": 12}): cv.positive_time_period,
+        probatio.Required(CONF_TARGET): cv.TARGET_FIELDS,
+        probatio.Optional(CONF_OPTIONS, default={}): {
+            probatio.Optional(CONF_FOR, default={"hours": 12}): cv.positive_time_period,
         },
     }
 )
@@ -88,17 +108,22 @@ class NoNewArticlesTrigger(Trigger):
 
     @override
     @classmethod
-    async def async_validate_config(cls, hass: HomeAssistant, config: ConfigType) -> ConfigType:
+    async def async_validate_config(
+        cls, hass: HomeAssistant, config: ConfigType
+    ) -> ConfigType:
         return cast(ConfigType, NO_NEW_ARTICLES_SCHEMA(config))
 
     def __init__(self, hass: HomeAssistant, config: TriggerConfig) -> None:
+        """היעד ומשך הזמן מההגדרות."""
         super().__init__(hass, config)
         self._target: dict[str, Any] = config.target or {}
         self._for: timedelta = (config.options or {})[CONF_FOR]
 
     @override
     async def async_attach_runner(
-        self, run_action: TriggerActionRunner, did_not_trigger: TriggerNotTriggeredReporter | None = None
+        self,
+        run_action: TriggerActionRunner,
+        did_not_trigger: TriggerNotTriggeredReporter | None = None,
     ) -> CALLBACK_TYPE:
         # לכל פיד: הכתבה החדשה ביותר שעליה הטיימר מחכה, וביטול הטיימר
         timers: dict[str, tuple[datetime, CALLBACK_TYPE]] = {}
@@ -131,13 +156,18 @@ class NoNewArticlesTrigger(Trigger):
                     f"no new articles from {title} for {self._for}",
                 )
 
-            timers[entry_id] = (newest, async_track_point_in_utc_time(self._hass, fire, newest + self._for))
+            timers[entry_id] = (
+                newest,
+                async_track_point_in_utc_time(self._hass, fire, newest + self._for),
+            )
 
         # ponytail: היעד נפתר בהפעלת האוטומציה; פיד שנוסף למכשיר או לאזור אחר כך ייכנס בטעינה הבאה שלה
         entry_ids = entry_ids_for_target(self._hass, self._target)
         unsubs = [
             async_dispatcher_connect(
-                self._hass, SIGNAL_UPDATED.format(entry_id), callback(lambda entry_id=entry_id: schedule(entry_id))
+                self._hass,
+                SIGNAL_UPDATED.format(entry_id),
+                callback(lambda entry_id=entry_id: schedule(entry_id)),
             )
             for entry_id in entry_ids
         ]
@@ -155,7 +185,10 @@ class NoNewArticlesTrigger(Trigger):
         return detach
 
 
-TRIGGERS: dict[str, type[Trigger]] = {"new_article": NewArticleTrigger, "no_new_articles": NoNewArticlesTrigger}
+TRIGGERS: dict[str, type[Trigger]] = {
+    "new_article": NewArticleTrigger,
+    "no_new_articles": NoNewArticlesTrigger,
+}
 
 
 async def async_get_triggers(hass: HomeAssistant) -> dict[str, type[Trigger]]:

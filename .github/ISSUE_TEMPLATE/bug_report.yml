@@ -20,7 +20,7 @@ body:
     attributes:
       label: News Card version
       description: HACS shows it, and so does Settings → Devices & services → News Card.
-      placeholder: "1.7.0"
+      placeholder: "1.8.0"
     validations:
       required: true
   - type: input

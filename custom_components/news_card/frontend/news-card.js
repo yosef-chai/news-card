@@ -4,7 +4,7 @@
  * ותומך גם בישויות event של Feedreader (הכתבה האחרונה בלבד).
  */
 
-const CARD_VERSION = "1.7.0";
+const CARD_VERSION = "1.8.0";
 const DOMAIN = "news_card";
 const READ_KEY = "news-card:read";
 const READ_LIMIT = 500;
@@ -181,6 +181,46 @@ function safeUrl(url) {
   }
 }
 
+/** יצירת Intl יקרה: שומרים פורמטרים לפי סוג, שפה ואפשרויות. */
+const FORMATTERS = new Map();
+function formatter(Type, lang, opts) {
+  const key = `${Type.name}|${lang}|${JSON.stringify(opts)}`;
+  let f = FORMATTERS.get(key);
+  if (!f) FORMATTERS.set(key, (f = new Type(lang, opts)));
+  return f;
+}
+
+/** תקציר של Feedreader מגיע כ-HTML: מוציאים ממנו טקסט בלבד (DOMParser לא מריץ סקריפטים ולא טוען תמונות). */
+const TEXTS = new Map();
+function htmlToText(html) {
+  if (!html || typeof html !== "string") return "";
+  if (!/[<&]/.test(html)) return html;
+  let text = TEXTS.get(html);
+  if (text === undefined) {
+    const body = new DOMParser().parseFromString(html, "text/html").body;
+    body.querySelectorAll("script, style, noscript, template").forEach((n) => n.remove());
+    text = (body.textContent || "").trim();
+    if (TEXTS.size > 100) TEXTS.clear();
+    TEXTS.set(html, text);
+  }
+  return text;
+}
+
+/** מצב האנימציה של פס גלילה: החלק שכבר עבר במחזור (0–1), או null אם אין אנימציה. */
+function animProgress(el) {
+  const anim = el?.getAnimations?.()[0];
+  const duration = anim?.effect?.getComputedTiming?.().duration;
+  if (!anim || !duration || anim.currentTime == null) return null;
+  return (anim.currentTime % duration) / duration;
+}
+
+function setAnimProgress(el, progress) {
+  if (progress == null) return;
+  const anim = el?.getAnimations?.()[0];
+  const duration = anim?.effect?.getComputedTiming?.().duration;
+  if (anim && duration) anim.currentTime = progress * duration;
+}
+
 /** hash קטן ליציבות הסדר האקראי בין רינדורים. */
 function hash(str) {
   let h = 2166136261;
@@ -262,7 +302,7 @@ const STYLE = `
     width: 100%; box-sizing: border-box; border: none; background: none; font: inherit;
     border-radius: 0; outline: none; position: relative;
   }
-  .item + .item::before {
+  .li + .li > .item::before {
     content: ""; position: absolute; top: 0; inset-inline: var(--ha-space-4, 16px);
     border-top: 1px solid var(--divider-color);
   }
@@ -300,12 +340,14 @@ const STYLE = `
     border-inline-start: 4px solid var(--alert-color, var(--error-color, #db4437));
   }
   .alert.warning { --alert-color: var(--warning-color, #ffa600); }
-  button.text {
+  .text {
     font: inherit; font-weight: var(--ha-font-weight-medium, 500); color: var(--primary-color);
     background: none; border: none; cursor: pointer; padding: var(--ha-space-2, 8px) var(--ha-space-3, 12px);
     border-radius: var(--ha-border-radius-pill, 999px);
   }
-  button.text:hover { background: color-mix(in srgb, var(--primary-color) 10%, transparent); }
+  a.text { display: inline-block; text-decoration: none; }
+  .text:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .text:hover { background: color-mix(in srgb, var(--primary-color) 10%, transparent); }
   .skeleton { height: 54px; margin: var(--ha-space-2, 8px) var(--ha-space-4, 16px); border-radius: var(--ha-border-radius-md, 8px);
     background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary-text-color) 6%, transparent), transparent) 0 0 / 200% 100%;
     animation: shimmer 1.4s infinite linear; }
@@ -320,6 +362,7 @@ const STYLE = `
     mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
   .track { display: flex; width: max-content; animation: scroll var(--duration, 60s) linear infinite; will-change: transform; }
   .group { display: flex; flex: none; }
+  .group > .li { display: flex; flex: none; }
   /* עוצרים כשמצביעים, כשמנווטים במקלדת, כשקוראים כתבה וכשהכרטיס מחוץ למסך */
   .viewport:hover .track, .viewport:has(:focus-visible) .track, .reading .track, .offscreen .track,
   .list.auto:hover .vtrack, .list.auto:has(:focus-visible) .vtrack, .reading .vtrack, .offscreen .vtrack { animation-play-state: paused; }
@@ -337,7 +380,7 @@ const STYLE = `
     mask-image: linear-gradient(transparent, #000 16px, #000 calc(100% - 16px), transparent); }
   .vtrack { animation: vscroll var(--duration, 60s) linear infinite; will-change: transform; }
   @keyframes vscroll { to { transform: translateY(-50%); } }
-  .vgroup + .vgroup > :first-child::before { content: ""; position: absolute; top: 0; inset-inline: var(--ha-space-4, 16px);
+  .vgroup + .vgroup > .li:first-child > .item::before { content: ""; position: absolute; top: 0; inset-inline: var(--ha-space-4, 16px);
     border-top: 1px solid var(--divider-color); }
   @media (prefers-reduced-motion: reduce) {
     .track { animation: none; }
@@ -362,7 +405,6 @@ const STYLE = `
   .dmeta { font-size: var(--ha-font-size-s, 12px); color: var(--secondary-text-color); margin-bottom: var(--ha-space-4, 16px); }
   .dsummary { white-space: pre-line; line-height: var(--ha-line-height-normal, 1.6); font-size: var(--ha-font-size-m, 14px); }
   .dactions { display: flex; justify-content: flex-end; gap: var(--ha-space-2, 8px); padding: 0 var(--ha-space-4, 16px) var(--ha-space-4, 16px); }
-  .dactions a { text-decoration: none; }
   .hidden { display: none !important; }
   .retrying { visibility: hidden; }
 `;
@@ -425,6 +467,7 @@ class NewsCard extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
+    this._watchConnection();
     if (first) this._subscribe();
     // רינדור רק כשמשהו רלוונטי השתנה: שפה, זמינות ישויות, או מצב ישות Feedreader
     const sig = [hass.locale?.language, hass.locale?.time_format, hass.locale?.time_zone, hass.entities === this._lastEntities ? "" : String(Math.random()), ...this._ids().map((id) => {
@@ -457,22 +500,25 @@ class NewsCard extends HTMLElement {
   }
 
   connectedCallback() {
+    this._watchConnection();
     this._subscribe();
     this._io = new IntersectionObserver(([entry]) => {
       this._visible = entry.isIntersecting;
       this.shadowRoot.querySelector("ha-card")?.classList.toggle("offscreen", !this._visible);
+      if (this._visible) this._updateTimes();
     });
     this._io.observe(this);
     this._ro = new ResizeObserver(() => this._scheduleLayout());
     this._ro.observe(this);
+    // זמנים יחסיים מתעדכנים במקום, בלי רינדור — כך הגלילה והפוקוס לא מתאפסים
     this._timer = setInterval(() => {
-      // בבר הגלילה לא מרנדרים כל דקה כדי לא לאפס את מיקום הגלילה
-      if (this._visible && this._config?.date_format === "relative" && this._config.display === "list" && !this._vloop) this._render();
+      if (this._visible) this._updateTimes();
     }, 60000);
   }
 
   disconnectedCallback() {
     this._unsubscribe();
+    this._unwatchConnection();
     this._io?.disconnect();
     this._ro?.disconnect();
     clearInterval(this._timer);
@@ -481,19 +527,37 @@ class NewsCard extends HTMLElement {
 
   // ---------- נתונים ----------
 
-  /** הישויות של כל המקורות: מכשירים שנבחרו בעורך + ישויות שהוגדרו ב-YAML. */
+  /** הישויות של כל מכשיר, נבנה פעם אחת לכל שינוי ברישום הישויות. */
+  _deviceEntities() {
+    const entities = this._hass?.entities;
+    if (this._devMapFor !== entities || !this._devMap) {
+      this._devMapFor = entities;
+      this._devMap = new Map();
+      for (const e of Object.values(entities || {})) {
+        if (!e.device_id || (e.platform !== DOMAIN && e.platform !== "feedreader")) continue;
+        if (!this._devMap.has(e.device_id)) this._devMap.set(e.device_id, []);
+        this._devMap.get(e.device_id).push(e);
+      }
+    }
+    return this._devMap;
+  }
+
+  /** הישויות של כל המקורות: מכשירים שנבחרו בעורך + ישויות שהוגדרו ב-YAML. נשמר עד שההגדרות או הרישום משתנים. */
   _ids() {
     if (!this._config) return [];
+    const entities = this._hass?.entities;
+    if (this._idsCache && this._idsCache.config === this._config && this._idsCache.entities === entities) return this._idsCache.ids;
     const ids = [...this._config.entities];
-    const all = Object.values(this._hass?.entities || {});
+    const map = this._deviceEntities();
     for (const device of this._config.feeds) {
-      const mine = all.filter((e) => e.device_id === device);
+      const mine = map.get(device) || [];
       const pick =
         mine.find((e) => e.platform === DOMAIN && e.entity_id.startsWith("sensor.") && !e.entity_category) ||
         mine.find((e) => e.platform === DOMAIN) ||
         mine.find((e) => e.platform === "feedreader" && e.entity_id.startsWith("event."));
       if (pick && !ids.includes(pick.entity_id)) ids.push(pick.entity_id);
     }
+    this._idsCache = { config: this._config, entities, ids };
     return ids;
   }
 
@@ -513,7 +577,27 @@ class NewsCard extends HTMLElement {
     return pageLanguage(this._hass);
   }
 
+  /** אחרי חיבור מחדש ל-HA: מנוי שנכשל נרשם שוב (מנוי שהצליח מתחדש לבד בספריית החיבור). */
+  _watchConnection() {
+    const conn = this._hass?.connection;
+    if (!this.isConnected || conn === this._conn || !conn?.addEventListener) return;
+    this._unwatchConnection();
+    this._conn = conn;
+    this._onReady = () => {
+      if (this._unsub || (this._status !== "not_installed" && this._status !== "connection_error")) return;
+      this._retries = 0;
+      this._subscribe();
+    };
+    conn.addEventListener("ready", this._onReady);
+  }
+
+  _unwatchConnection() {
+    this._conn?.removeEventListener?.("ready", this._onReady);
+    this._conn = undefined;
+  }
+
   async _subscribe() {
+    clearTimeout(this._retryTimer);
     if (!this._hass || !this._config || !this.isConnected) return;
     const ids = this._ids().filter((id) => !this._isFeedreader(id));
     const key = ids.join();
@@ -540,17 +624,26 @@ class NewsCard extends HTMLElement {
         this._render();
       }, { type: `${DOMAIN}/subscribe`, entity_ids: ids });
       if (token !== this._token) unsub();
-      else this._unsub = unsub;
+      else {
+        this._unsub = unsub;
+        this._retries = 0;
+      }
     } catch (err) {
       if (token !== this._token) return;
       this._subKey = undefined;
       this._status = err?.code === "unknown_command" ? "not_installed" : "connection_error";
       console.warn("news-card: subscribe failed", err);
       this._render();
+      // ניסיון חוזר בהשהיה הולכת וגדלה (למשל בזמן ש-HA עוד טוען את האינטגרציה)
+      const delays = [5, 15, 60, 300];
+      const delay = delays[Math.min(this._retries || 0, delays.length - 1)] * 1000;
+      this._retries = (this._retries || 0) + 1;
+      this._retryTimer = setTimeout(() => this._subscribe(), delay);
     }
   }
 
   _unsubscribe() {
+    clearTimeout(this._retryTimer);
     this._token = undefined;
     if (this._unsub) {
       this._unsub().catch?.(() => {});
@@ -569,7 +662,7 @@ class NewsCard extends HTMLElement {
         const a = st?.attributes;
         if (a?.title) {
           all.push({
-            id: a.link || a.title, title: a.title, link: a.link, summary: a.description || "", published: st.state && st.state !== "unknown" ? st.state : null,
+            id: a.link || a.title, title: a.title, link: a.link, summary: htmlToText(a.description), published: st.state && st.state !== "unknown" ? st.state : null,
             published_estimated: false, source: this._hass.devices?.[this._hass.entities[id]?.device_id]?.name || null, author: null, image: null, image_proxy: null,
           });
         }
@@ -617,7 +710,7 @@ class NewsCard extends HTMLElement {
     if (c.date_format === "relative") {
       const diff = (date.getTime() - Date.now()) / 1000;
       const units = [["year", 31536000], ["month", 2592000], ["week", 604800], ["day", 86400], ["hour", 3600], ["minute", 60]];
-      const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+      const rtf = formatter(Intl.RelativeTimeFormat, lang, { numeric: "auto" });
       for (const [unit, sec] of units) {
         // ‏ICU בעברית מוסיף מספר בסוגריים ("לפני שעתיים (2)"); הוא מיותר
         if (Math.abs(diff) >= sec) return rtf.format(Math.round(diff / sec), unit).replace(/\s*\(\d+\)/, "");
@@ -630,7 +723,7 @@ class NewsCard extends HTMLElement {
     if (c.show_date && date.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
     if (c.show_time) Object.assign(opts, { hour: "numeric", minute: "2-digit" });
     try {
-      return new Intl.DateTimeFormat(lang, opts).format(date);
+      return formatter(Intl.DateTimeFormat, lang, opts).format(date);
     } catch {
       return date.toLocaleString();
     }
@@ -643,8 +736,31 @@ class NewsCard extends HTMLElement {
     if (c.show_author && item.author) parts.push(esc(item.author));
     const showTime = c.date_format === "relative" ? c.show_date || c.show_time : true;
     const time = showTime ? this._formatTime(item.published) : "";
-    if (time) parts.push(item.published_estimated ? `<span title="${esc(t(this._lang(), "estimated"))}">~${esc(time)}</span>` : esc(time));
+    if (time) {
+      const span = this._timeSpan(item.published, time);
+      parts.push(item.published_estimated ? `<span title="${esc(t(this._lang(), "estimated"))}">~${span}</span>` : span);
+    }
     return parts.join(" · ");
+  }
+
+  /** זמן עם data-ts, כדי שהטיימר יעדכן אותו במקום. */
+  _timeSpan(iso, text, cls = "") {
+    return `<span${cls ? ` class="${cls}"` : ""} data-ts="${esc(iso)}">${esc(text)}</span>`;
+  }
+
+  /** עדכון זמנים יחסיים בלבד, בלי לגעת בשאר הכרטיס. */
+  _updateTimes() {
+    if (this._config?.date_format !== "relative") return;
+    let changed = false;
+    for (const el of this.shadowRoot.querySelectorAll("ha-card [data-ts]")) {
+      const text = this._formatTime(el.dataset.ts);
+      if (text && el.textContent !== text) {
+        el.textContent = text;
+        changed = true;
+      }
+    }
+    // רוחב הבר השתנה מעט; מודדים שוב
+    if (changed && this._config.display === "ticker") this._scheduleLayout();
   }
 
   // ---------- רינדור ----------
@@ -658,6 +774,7 @@ class NewsCard extends HTMLElement {
     this._dirty = false;
     const lang = this._lang();
     const c = this._config;
+    const rtl = this._isRtl(); // פעם אחת לכל רינדור: עלול לקרוא ל-getComputedStyle
     const items = this._items();
     const problems = this._problems(lang);
     const staleFeeds = this._ids().map((id) => this._feeds[id]).filter((f) => f?.stale);
@@ -679,24 +796,60 @@ class NewsCard extends HTMLElement {
     } else if (!items.length) {
       body = problems.length ? "" : `<div class="state">${esc(t(lang, "empty"))}</div>`;
     } else {
-      body = c.display === "ticker" ? this._tickerHtml(items, lang) : this._listHtml(items);
+      body = c.display === "ticker" ? this._tickerHtml(items, rtl) : this._listHtml(items);
     }
 
     const header = c.display !== "ticker" && (c.title || staleChip)
       ? `<div class="header"><h1>${esc(c.title || "")}</h1>${staleChip}</div>`
       : "";
     const alerts = problems.map((p) => `<div class="alert ${p.level}" role="status">${esc(p.text)}</div>`).join("");
-    const offscreen = this._visible ? "" : " offscreen";
 
     // הכיוון נקבע לפי שפת הממשק בלבד, גם לטקסט בשפה אחרת בתוך הכרטיס
-    const dir = this._isRtl() ? "rtl" : "ltr";
-    const html = `<ha-card dir="${dir}" class="mode-${c.display}${offscreen}">${header}${alerts}${body}</ha-card>`;
-    if (html === this._html && this.shadowRoot.querySelector("ha-card")) return;
-    this._html = html;
-    this.shadowRoot.innerHTML = `<style>${STYLE}</style>${html}${this._dialogHtml(dir)}`;
+    const card = this._ensureDom();
+    const dir = rtl ? "rtl" : "ltr";
+    card.setAttribute("dir", dir);
+    this.shadowRoot.querySelector("dialog").setAttribute("dir", dir);
+    card.className = `mode-${c.display}${this._visible ? "" : " offscreen"}${this._reading ? " reading" : ""}`;
     this._itemsById = new Map(items.map((i) => [i.id, i]));
-    this.shadowRoot.querySelector("ha-card")?.classList.toggle("reading", !!this._reading);
+    const html = `${header}${alerts}${body}`;
+    if (html === this._html) return;
+    this._html = html;
+    this._swap(card, html);
     if (c.display === "ticker" || c.auto_scroll) this._scheduleLayout();
+  }
+
+  /** הסגנון, ha-card והחלון נבנים פעם אחת; ברינדור מתחלף רק התוכן של ha-card. */
+  _ensureDom() {
+    let card = this.shadowRoot.querySelector("ha-card");
+    if (!card) {
+      this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card></ha-card>${this._dialogHtml()}`;
+      card = this.shadowRoot.querySelector("ha-card");
+    }
+    return card;
+  }
+
+  /** החלפת התוכן תוך שמירה על מיקום הגלילה, הפוקוס והמקום באנימציה. */
+  _swap(card, html) {
+    const root = this.shadowRoot;
+    const scrollTop = root.querySelector(".list")?.scrollTop || 0;
+    const progress = animProgress(root.querySelector(".track, .vtrack"));
+    const focused = root.activeElement?.closest?.("[data-id]");
+    let focusIndex = -1;
+    if (focused && card.contains(focused)) {
+      focusIndex = [...card.querySelectorAll(`[data-id="${CSS.escape(focused.dataset.id)}"]`)].indexOf(focused);
+    }
+    const focusRetry = !!root.activeElement?.matches?.("[data-retry]");
+
+    card.innerHTML = html;
+
+    const list = card.querySelector(".list");
+    if (list && scrollTop) list.scrollTop = scrollTop;
+    setAnimProgress(card.querySelector(".track, .vtrack"), progress);
+    if (focusIndex >= 0) {
+      card.querySelectorAll(`[data-id="${CSS.escape(focused.dataset.id)}"]`)[focusIndex]?.focus({ preventScroll: true });
+    } else if (focusRetry) {
+      card.querySelector("[data-retry]")?.focus({ preventScroll: true });
+    }
   }
 
   /** המדידה דורשת פריסה; כשהכרטיס עוד לא מוצג (עורך, טעינה) מנסים שוב בפריים הבא. */
@@ -726,7 +879,7 @@ class NewsCard extends HTMLElement {
   _formatAbsolute(iso) {
     if (!iso) return "—";
     try {
-      return new Intl.DateTimeFormat(this._hass?.locale?.language || this._lang(), {
+      return formatter(Intl.DateTimeFormat, this._hass?.locale?.language || this._lang(), {
         dateStyle: "medium", timeStyle: "short", timeZone: this._timeZone(), hour12: this._hour12(),
       }).format(new Date(iso));
     } catch {
@@ -749,13 +902,16 @@ class NewsCard extends HTMLElement {
     const read = this._config.mark_read && (item.read || this._read.has(item.id)) ? " read" : "";
     const link = safeUrl(item.link);
     const action = this._config.tap_action;
+    let el;
     if (action === "link" && link) {
-      return `<a class="${cls} tappable${read}" href="${esc(link)}" target="_blank" rel="noopener noreferrer" data-id="${esc(item.id)}" role="listitem">${inner}</a>`;
+      el = `<a class="${cls} tappable${read}" href="${esc(link)}" target="_blank" rel="noopener noreferrer" data-id="${esc(item.id)}">${inner}</a>`;
+    } else if (action === "dialog") {
+      el = `<div class="${cls} tappable${read}" role="button" tabindex="0" data-open="${esc(item.id)}" data-id="${esc(item.id)}">${inner}</div>`;
+    } else {
+      el = `<div class="${cls}${read}">${inner}</div>`;
     }
-    if (action === "dialog") {
-      return `<div class="${cls} tappable${read}" role="button" tabindex="0" data-open="${esc(item.id)}" data-id="${esc(item.id)}">${inner}</div>`;
-    }
-    return `<div class="${cls}${read}" role="listitem">${inner}</div>`;
+    // עטיפה בפריט רשימה, כדי שהקישור או הכפתור ישמרו על התפקיד שלהם
+    return `<div class="li" role="listitem">${el}</div>`;
   }
 
   _listHtml(items) {
@@ -771,17 +927,16 @@ class NewsCard extends HTMLElement {
     return `<div class="list auto" aria-live="off"><div class="vtrack"${duration}><div class="vgroup" role="list">${rows.join("")}</div><div class="vgroup" aria-hidden="true" inert>${rows.join("")}</div></div></div>`;
   }
 
-  _tickerHtml(items, lang) {
+  _tickerHtml(items, rtl) {
     const reps = this._reps || 1;
     const one = items.map((item) => {
       const time = this._config.date_format === "relative" || this._config.show_date || this._config.show_time ? this._formatTime(item.published) : "";
-      const inner = `${this._img(item, "tthumb")}<span class="ttitle">${esc(item.title)}</span>${time ? `<span class="ttime">${esc(time)}</span>` : ""}`;
+      const inner = `${this._img(item, "tthumb")}<span class="ttitle">${esc(item.title)}</span>${time ? this._timeSpan(item.published, time, "ttime") : ""}`;
       return this._wrap(item, "tick", inner);
     }).join('<span class="sep" aria-hidden="true">•</span>');
     const group = Array(reps).fill(one).join('<span class="sep" aria-hidden="true">•</span>') + '<span class="sep" aria-hidden="true">•</span>';
     const label = this._config.title ? `<span class="label">${esc(this._config.title)}</span>` : "";
     // aria-live כבוי: קורא מסך לא יוצף בכל גלילה; העותק השני מוסתר ממנו
-    const rtl = this._isRtl();
     // RTL: התוכן זז ימינה (משמאל לימין); LTR: התוכן זז שמאלה
     const duration = this._loopSize ? `--duration:${Math.max(2, this._loopSize / this._config.scroll_speed)}s;` : "";
     return `<div class="ticker" dir="${rtl ? "rtl" : "ltr"}">${label}
@@ -844,14 +999,20 @@ class NewsCard extends HTMLElement {
   /** משך = אורך עותק אחד ÷ מהירות, כך שהמהירות בפיקסלים לשנייה מדויקת. */
   _setLoop(track, size) {
     this._loopSize = size;
-    track?.style.setProperty("--duration", `${Math.max(2, size / this._config.scroll_speed)}s`);
+    if (!track) return;
+    const value = `${Math.max(2, size / this._config.scroll_speed)}s`;
+    if (track.style.getPropertyValue("--duration") === value) return;
+    // שינוי משך בלי קפיצה: שומרים על החלק היחסי שכבר עבר
+    const progress = animProgress(track);
+    track.style.setProperty("--duration", value);
+    setAnimProgress(track, progress);
   }
 
-  _dialogHtml(dir) {
-    return `<dialog dir="${dir}" aria-labelledby="dtitle">
+  _dialogHtml() {
+    return `<dialog aria-labelledby="dtitle">
       <img class="dimg hidden" alt="" referrerpolicy="no-referrer">
       <div class="dbody"><h2 class="dtitle" id="dtitle"></h2><div class="dmeta"></div><div class="dsummary"></div></div>
-      <div class="dactions"><button class="text" data-close></button><a class="hidden" target="_blank" rel="noopener noreferrer"><button class="text" tabindex="-1"></button></a></div>
+      <div class="dactions"><button class="text" data-close></button><a class="text hidden" target="_blank" rel="noopener noreferrer"></a></div>
     </dialog>`;
   }
 
@@ -862,8 +1023,13 @@ class NewsCard extends HTMLElement {
     const lang = this._lang();
     const img = d.querySelector(".dimg");
     const src = this._config.show_image ? safeUrl(item.image_proxy ? new URL(item.image_proxy, location.href).href : null) || safeUrl(item.image) : null;
+    // החלון נשמר בין פתיחות: מנקים את מצב התמונה הקודמת
+    delete img.dataset.fallback;
+    delete img.dataset.retries;
+    img.classList.remove("retrying");
     img.classList.toggle("hidden", !src);
-    if (src) {
+    if (!src) img.removeAttribute("src");
+    else {
       img.src = src;
       if (item.image_proxy && item.image) img.dataset.fallback = item.image;
     }
@@ -878,7 +1044,7 @@ class NewsCard extends HTMLElement {
     if (link) {
       a.href = link;
       a.dataset.id = item.id;
-      a.querySelector("button").textContent = t(lang, "open_article");
+      a.textContent = t(lang, "open_article");
     }
     d.showModal();
   }
@@ -889,6 +1055,7 @@ class NewsCard extends HTMLElement {
     const path = ev.composedPath();
     const el = (sel) => path.find((n) => n.matches?.(sel));
     if (el("[data-retry]")) {
+      this._retries = 0;
       this._status = "loading";
       this._render();
       this._subscribe();
@@ -983,8 +1150,22 @@ class NewsCard extends HTMLElement {
 /** עורך חזותי: ha-form עם סכמה שמשתנה לפי הבחירות (למשל מהירות רק לבר התחתון). */
 class NewsCardEditor extends HTMLElement {
   setConfig(config) {
-    this._config = config;
+    // הגדרה שלא אנחנו שלחנו (פתיחה, או עריכה ב-YAML): המפתחות שבה נשמרים גם כשהם שווים לברירת המחדל
+    if (JSON.stringify(config) !== this._sent) this._explicit = new Set(Object.keys(config || {}));
+    this._config = this._migrate(config);
     this._render();
+  }
+
+  /** ticker_speed הוא השם הישן של scroll_speed. */
+  _migrate(config) {
+    if (!config || !("ticker_speed" in config)) return config;
+    const out = { ...config };
+    if (out.scroll_speed == null) {
+      out.scroll_speed = out.ticker_speed;
+      this._explicit.add("scroll_speed");
+    }
+    delete out.ticker_speed;
+    return out;
   }
 
   set hass(hass) {
@@ -1051,7 +1232,13 @@ class NewsCardEditor extends HTMLElement {
         for (const key of ["entities", "feeds", "title"]) {
           if (Array.isArray(config[key]) ? !config[key].length : !config[key]) delete config[key];
         }
+        // ברירות מחדל שהטופס הציג לא נכתבות ל-YAML, אלא אם הן היו בהגדרה מלכתחילה
+        for (const [key, value] of Object.entries(DEFAULTS)) {
+          if (config[key] === value && !this._explicit?.has(key)) delete config[key];
+        }
+        delete config.ticker_speed;
         this._config = config;
+        this._sent = JSON.stringify(config);
         this._form.schema = this._schema(config);
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
       });
@@ -1081,8 +1268,10 @@ if (!window.customCards?.some((c) => c.type === "news-card")) {
     preview: true,
     documentationURL: "https://github.com/yosef-chai/news-card",
     getEntitySuggestion: (hass, entityId) => {
+      // רק לפידים של News Card ולישויות event של Feedreader; לכל השאר אין הצעה
       const e = hass?.entities?.[entityId];
-      return e?.platform === DOMAIN && e.device_id ? { config: { type: "custom:news-card", feeds: [e.device_id] } } : null;
+      const ours = e?.platform === DOMAIN || (e?.platform === "feedreader" && entityId.startsWith("event."));
+      return ours && e.device_id ? { config: { type: "custom:news-card", feeds: [e.device_id] } } : null;
     },
   });
   console.info(`%c NEWS-CARD %c ${CARD_VERSION} `, "color:#fff;background:#2b8fd0;font-weight:700", "color:#2b8fd0");
