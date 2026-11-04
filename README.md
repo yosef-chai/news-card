@@ -1,6 +1,6 @@
 # <img src="https://raw.githubusercontent.com/yosef-chai/news-card/main/custom_components/news_card/brand/icon.png" alt="" width="40" height="40"> News Card
 
-[![HACS Custom][hacs-badge]][hacs]
+[![Marketplace][marketplace-badge]][my-marketplace]
 [![GitHub Release][release-badge]][release]
 [![Home Assistant][ha-badge]][ha]
 [![Validate][validate-badge]][validate]
@@ -39,11 +39,25 @@ News feeds for Home Assistant, installed together as one package:
 - New **podcast episodes**, **GitHub releases** or **YouTube uploads**, since they're feeds too.
 - An alert when a feed **stops publishing**, for example because the site is down.
 
+<!-- ha-marketplace:exclude-start -->
 ## Installation
 
 Requires Home Assistant 2026.9 or newer.
 
-### HACS (recommended)
+### Marketplace (Home Assistant 2026.11 and newer)
+
+[![Open your Home Assistant instance and open a repository in the Marketplace.][my-marketplace-badge]][my-marketplace]
+
+1. Select the button above. Or go to **Settings → Marketplace**, select **Add from link** and enter `yosef-chai/news-card`. If the Marketplace asks you to connect GitHub, follow its steps.
+2. Select **Install**, check the version, and select **Install** again.
+3. The setup page opens when the install is done. Refresh the browser so the card loads.
+
+Updates show up under **Settings → Updates**. After an update, a repair offers to restart Home Assistant.
+
+> [!NOTE]
+> The card is registered automatically. You don't need to add a dashboard resource.
+
+### HACS (Home Assistant 2026.9 and 2026.10)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs]
 
@@ -51,14 +65,14 @@ Requires Home Assistant 2026.9 or newer.
 2. Search for **News Card** and select **Download**.
 3. Restart Home Assistant.
 
-> [!NOTE]
-> The card is registered automatically. You don't need to add a dashboard resource.
+When you update to Home Assistant 2026.11, HACS moves News Card to the Marketplace for you.
 
 ### Manual
 
 1. Download **Source code (zip)** from the [latest release][release].
 2. Copy `custom_components/news_card` into your `config/custom_components/` folder.
 3. Restart Home Assistant.
+<!-- ha-marketplace:exclude-end -->
 
 ## Configuration
 
@@ -327,7 +341,6 @@ actions:
 - **Image links** signed for the card are valid for 24 hours and renewed automatically. `get_entries` returns the original image address, and `image_proxy` is `null` there.
 - **Dashboards in YAML mode, or Home Assistant Cast.** The card loads automatically. If it doesn't appear, add `/news_card/frontend/news-card.js` as a dashboard resource of type JavaScript module.
 - **Panel view.** An open frontend issue can show "Configuration error" until the page is refreshed, because custom modules don't always load before panel views render. Sections and masonry views aren't affected.
-- **The HACS store tile** may show an empty icon. The integrations page, setup flows and device pages show the icon as usual.
 
 ## Troubleshooting
 
@@ -359,7 +372,10 @@ Diagnostics are under **Settings → Devices & services → News Card → ⋮ �
 ## Removal
 
 1. Go to **Settings → Devices & services → News Card**, and for each feed select **⋮ → Delete**. Its stored data is deleted too.
-2. Remove News Card in HACS (or delete `config/custom_components/news_card`), then restart Home Assistant.
+2. Uninstall the integration:
+   - **Marketplace:** open News Card in **Settings → Marketplace**, select **⋮ → Uninstall**, then restart Home Assistant from the repair that appears.
+   - **HACS:** remove News Card in HACS, then restart Home Assistant.
+   - **Manual:** delete `config/custom_components/news_card`, then restart Home Assistant.
 3. Remove the News Card cards from your dashboards.
 
 ## Contributing
@@ -379,8 +395,7 @@ mypy
 [MIT][license] © Yosef Chai
 
 <!-- Links -->
-[hacs]: https://hacs.xyz
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[marketplace-badge]: https://img.shields.io/badge/Marketplace-Custom-41BDF5.svg?logo=homeassistant
 [release]: https://github.com/yosef-chai/news-card/releases/latest
 [release-badge]: https://img.shields.io/github/v/release/yosef-chai/news-card
 [ha]: https://www.home-assistant.io
@@ -394,6 +409,8 @@ mypy
 [readme-he]: https://github.com/yosef-chai/news-card/blob/main/README.he.md
 [issues]: https://github.com/yosef-chai/news-card/issues
 [translations]: https://github.com/yosef-chai/news-card/tree/main/custom_components/news_card/translations
+[my-marketplace]: https://my.home-assistant.io/redirect/marketplace_repository/?owner=yosef-chai&repository=news-card&category=integration
+[my-marketplace-badge]: https://my.home-assistant.io/badges/marketplace_repository.svg
 [my-hacs]: https://my.home-assistant.io/redirect/hacs_repository/?owner=yosef-chai&repository=news-card&category=integration
 [my-hacs-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [my-flow]: https://my.home-assistant.io/redirect/config_flow_start/?domain=news_card

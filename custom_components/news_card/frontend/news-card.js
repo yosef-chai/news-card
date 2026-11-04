@@ -860,10 +860,23 @@ class NewsCard extends HTMLElement {
     });
   }
 
+  /** שם הפיד הוא שם המכשיר. friendly_name עומד לצאת משימוש (2026.11), ונשאר רק כגיבוי. */
+  _feedName(id) {
+    const st = this._hass?.states[id];
+    if (!st) return id;
+    try {
+      const name = this._hass.formatEntityName?.(st, [{ type: "device" }]);
+      if (name) return name;
+    } catch {
+      // ממשק ישן בלי התמיכה הזו
+    }
+    return st.attributes?.friendly_name || id;
+  }
+
   _problems(lang) {
     const out = [];
     for (const id of this._ids()) {
-      const name = this._hass?.states[id]?.attributes?.friendly_name || id;
+      const name = this._feedName(id);
       const feed = this._feeds[id];
       if (feed?.error && !feed.entries) {
         out.push({ level: "error", text: t(lang, feed.error, { entity: name }) });

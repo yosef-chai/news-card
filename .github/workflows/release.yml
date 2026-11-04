@@ -31,7 +31,14 @@ jobs:
           CARD=$(grep -oP 'CARD_VERSION = "\K[^"]+' custom_components/news_card/frontend/news-card.js)
           echo "tag=$TAG manifest=$MANIFEST card=$CARD"
           test "$TAG" = "$MANIFEST" && test "$TAG" = "$CARD"
+      # ישות העדכון של ה-Marketplace מציגה את גוף הגרסה; הוא נלקח מגוף הודעת ה-commit של התג
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+        run: |
+          git log -1 --format=%b HEAD > notes.md
+          if [ -s notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --notes-file notes.md --title "$GITHUB_REF_NAME"
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          fi

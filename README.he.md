@@ -2,7 +2,7 @@
 
 # <img src="https://raw.githubusercontent.com/yosef-chai/news-card/main/custom_components/news_card/brand/icon.png" alt="" width="40" height="40"> News Card
 
-[![HACS Custom][hacs-badge]][hacs]
+[![Marketplace][marketplace-badge]][my-marketplace]
 [![GitHub Release][release-badge]][release]
 [![Home Assistant][ha-badge]][ha]
 [![Validate][validate-badge]][validate]
@@ -45,7 +45,20 @@
 
 דורש Home Assistant 2026.9 ומעלה.
 
-### דרך HACS (מומלץ)
+### דרך ה-Marketplace (‏Home Assistant 2026.11 ומעלה)
+
+[![Open your Home Assistant instance and open a repository in the Marketplace.][my-marketplace-badge]][my-marketplace]
+
+1. לוחצים על הכפתור. או נכנסים ל**הגדרות ← Marketplace**, בוחרים **Add from link** ומזינים `yosef-chai/news-card`. אם ה-Marketplace מבקש לחבר את GitHub, עוברים על השלבים שהוא מציג.
+2. לוחצים **Install**, בודקים את הגרסה ולוחצים שוב **Install**.
+3. בסוף ההתקנה נפתח דף ההגדרה. מרעננים את הדפדפן כדי שהכרטיס ייטען.
+
+עדכונים מופיעים ב**הגדרות ← עדכונים**. אחרי עדכון מופיעה הודעה במרכז התיקונים שמציעה להפעיל מחדש את Home Assistant.
+
+> [!NOTE]
+> הכרטיס נרשם אוטומטית, בלי צורך להוסיף משאב ללוח.
+
+### דרך HACS ‏(Home Assistant 2026.9 ו-2026.10)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs]
 
@@ -53,8 +66,7 @@
 2. מחפשים **News Card** ולוחצים **Download**.
 3. מפעילים מחדש את Home Assistant.
 
-> [!NOTE]
-> הכרטיס נרשם אוטומטית, בלי צורך להוסיף משאב ללוח.
+בעדכון ל-Home Assistant 2026.11, ‏News Card עובר מ-HACS ל-Marketplace לבד.
 
 ### התקנה ידנית
 
@@ -361,7 +373,6 @@ actions:
 - **קישורי התמונות** שנחתמים לכרטיס תקפים 24 שעות ומתחדשים לבד. ‏`get_entries` מחזירה את כתובת התמונה המקורית, ושם `image_proxy` הוא `null`.
 - **לוחות במצב YAML, או Home Assistant Cast.** הכרטיס נטען אוטומטית. אם הוא לא מופיע, מוסיפים את `/news_card/frontend/news-card.js` כמשאב לוח מסוג JavaScript module.
 - **תצוגת Panel.** תקלה פתוחה בממשק עלולה להציג "שגיאת תצורה" עד רענון הדף, כי מודולים חיצוניים לא תמיד נטענים לפני שתצוגות Panel מוצגות. בתצוגות Sections ו-Masonry זה לא קורה.
-- **האריח בחנות של HACS** עלול להופיע בלי אייקון. בדף השילובים, בתהליכי ההגדרה ובדפי המכשירים האייקון מוצג כרגיל.
 
 ## פתרון תקלות
 
@@ -397,7 +408,10 @@ logger:
 ## הסרה
 
 1. נכנסים ל**הגדרות ← מכשירים ושירותים ← News Card**, ובכל פיד בוחרים **⋮ ← מחיקה**. גם הנתונים השמורים שלו נמחקים.
-2. מסירים את News Card ב-HACS (או מוחקים את `config/custom_components/news_card`) ומפעילים מחדש את Home Assistant.
+2. מסירים את השילוב:
+   - **Marketplace:** פותחים את News Card ב**הגדרות ← Marketplace**, בוחרים **⋮ ← Uninstall**, ומפעילים מחדש את Home Assistant מההודעה שמופיעה במרכז התיקונים.
+   - **HACS:** מסירים את News Card ב-HACS ומפעילים מחדש את Home Assistant.
+   - **התקנה ידנית:** מוחקים את `config/custom_components/news_card` ומפעילים מחדש את Home Assistant.
 3. מסירים את כרטיסי News Card מהלוחות.
 
 ## תרומה לפרויקט
@@ -423,8 +437,7 @@ mypy
 </div>
 
 <!-- Links -->
-[hacs]: https://hacs.xyz
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[marketplace-badge]: https://img.shields.io/badge/Marketplace-Custom-41BDF5.svg?logo=homeassistant
 [release]: https://github.com/yosef-chai/news-card/releases/latest
 [release-badge]: https://img.shields.io/github/v/release/yosef-chai/news-card
 [ha]: https://www.home-assistant.io
@@ -438,6 +451,8 @@ mypy
 [readme-en]: https://github.com/yosef-chai/news-card/blob/main/README.md
 [issues]: https://github.com/yosef-chai/news-card/issues
 [translations]: https://github.com/yosef-chai/news-card/tree/main/custom_components/news_card/translations
+[my-marketplace]: https://my.home-assistant.io/redirect/marketplace_repository/?owner=yosef-chai&repository=news-card&category=integration
+[my-marketplace-badge]: https://my.home-assistant.io/badges/marketplace_repository.svg
 [my-hacs]: https://my.home-assistant.io/redirect/hacs_repository/?owner=yosef-chai&repository=news-card&category=integration
 [my-hacs-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [my-flow]: https://my.home-assistant.io/redirect/config_flow_start/?domain=news_card
