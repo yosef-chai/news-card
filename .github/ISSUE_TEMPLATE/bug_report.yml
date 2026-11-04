@@ -20,7 +20,7 @@ body:
     attributes:
       label: News Card version
       description: The Marketplace (or HACS) shows it, and so does Settings → Devices & services → News Card.
-      placeholder: "1.9.0"
+      placeholder: "1.10.0"
     validations:
       required: true
   - type: input

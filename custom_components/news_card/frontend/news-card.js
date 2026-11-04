@@ -4,7 +4,7 @@
  * ותומך גם בישויות event של Feedreader (הכתבה האחרונה בלבד).
  */
 
-const CARD_VERSION = "1.9.0";
+const CARD_VERSION = "1.10.0";
 const DOMAIN = "news_card";
 const READ_KEY = "news-card:read";
 const READ_LIMIT = 500;
@@ -50,6 +50,9 @@ const STRINGS = {
     show_time: "Time",
     show_source: "Source",
     show_author: "Author",
+    show_summary: "Summary",
+    summary_lines: "Summary lines",
+    helper_summary_lines: "A longer summary is cut off. Select the article to read all of it.",
     order: "Order and amount",
     sort: "Sort",
     sort_desc: "Newest first",
@@ -110,6 +113,9 @@ const STRINGS = {
     show_time: "שעה",
     show_source: "מקור",
     show_author: "כותב",
+    show_summary: "תקציר",
+    summary_lines: "שורות תקציר",
+    helper_summary_lines: "תקציר ארוך יותר נחתך. לחיצה על הכתבה מציגה את כולו.",
     order: "סדר וכמות",
     sort: "מיון",
     sort_desc: "החדשות קודם",
@@ -140,6 +146,8 @@ const DEFAULTS = {
   show_time: true,
   show_source: true,
   show_author: false,
+  show_summary: false,
+  summary_lines: 2,
   sort: "desc",
   max_items: 30,
   date_format: "absolute",
@@ -249,6 +257,8 @@ function normalizeConfig(config) {
   out.scroll_speed = Math.max(5, Math.min(100, Number(config.scroll_speed ?? config.ticker_speed) || DEFAULTS.scroll_speed));
   delete out.ticker_speed;
   out.auto_scroll = !!out.auto_scroll;
+  out.show_summary = !!out.show_summary;
+  out.summary_lines = Math.max(1, Math.min(10, Math.round(Number(out.summary_lines)) || DEFAULTS.summary_lines));
   return out;
 }
 
@@ -324,6 +334,12 @@ const STYLE = `
   .meta {
     margin-top: 2px; font-size: var(--ha-font-size-s, 12px);
     color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .summary {
+    margin-top: 2px; font-size: var(--ha-font-size-s, 12px); line-height: var(--ha-line-height-normal, 1.5);
+    color: var(--secondary-text-color);
+    display: -webkit-box; -webkit-line-clamp: var(--summary-lines, 2); -webkit-box-orient: vertical; overflow: hidden;
+    overflow-wrap: anywhere;
   }
   .read .title { color: var(--secondary-text-color); font-weight: var(--ha-font-weight-normal, 400); }
   .read .thumb { opacity: 0.6; }
@@ -491,7 +507,9 @@ class NewsCard extends HTMLElement {
 
   getCardSize() {
     if (this._config?.display === "ticker") return 1;
-    return 1 + Math.min(this._items().length || 3, this._config?.max_items || 5) * 1.5;
+    // יחידה = 50px; שורת תקציר היא כ-18px
+    const perItem = 1.5 + (this._config?.show_summary ? this._config.summary_lines * 0.36 : 0);
+    return Math.ceil(1 + Math.min(this._items().length || 3, this._config?.max_items || 5) * perItem);
   }
 
   getGridOptions() {
@@ -928,16 +946,20 @@ class NewsCard extends HTMLElement {
   }
 
   _listHtml(items) {
+    const c = this._config;
     const rows = items.map((item) => {
       const meta = this._meta(item);
-      const inner = `${this._img(item, "thumb")}<div class="body"><div class="title">${esc(item.title)}</div>${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
+      // התקציר מגיע כטקסט נקי; ירידות שורה הופכות לרווח כדי שהחיתוך לפי שורות יעבוד
+      const summary = c.show_summary && item.summary ? `<div class="summary">${esc(item.summary.replace(/\s+/g, " ").trim())}</div>` : "";
+      const inner = `${this._img(item, "thumb")}<div class="body"><div class="title">${esc(item.title)}</div>${summary}${meta ? `<div class="meta">${meta}</div>` : ""}</div>`;
       return this._wrap(item, "item", inner);
     });
-    if (!this._config.auto_scroll) return `<div class="list" role="list">${rows.join("")}</div>`;
-    if (!this._vloop) return `<div class="list auto" role="list">${rows.join("")}</div>`;
+    const lines = c.show_summary ? ` style="--summary-lines:${c.summary_lines}"` : "";
+    if (!c.auto_scroll) return `<div class="list" role="list"${lines}>${rows.join("")}</div>`;
+    if (!this._vloop) return `<div class="list auto" role="list"${lines}>${rows.join("")}</div>`;
     // הכתבות לא נכנסות בגובה: שני עותקים בלולאה אנכית (העותק השני מוסתר מקורא מסך)
-    const duration = this._loopSize ? ` style="--duration:${Math.max(2, this._loopSize / this._config.scroll_speed)}s"` : "";
-    return `<div class="list auto" aria-live="off"><div class="vtrack"${duration}><div class="vgroup" role="list">${rows.join("")}</div><div class="vgroup" aria-hidden="true" inert>${rows.join("")}</div></div></div>`;
+    const duration = this._loopSize ? ` style="--duration:${Math.max(2, this._loopSize / c.scroll_speed)}s"` : "";
+    return `<div class="list auto" aria-live="off"${lines}><div class="vtrack"${duration}><div class="vgroup" role="list">${rows.join("")}</div><div class="vgroup" aria-hidden="true" inert>${rows.join("")}</div></div></div>`;
   }
 
   _tickerHtml(items, rtl) {
@@ -1198,6 +1220,7 @@ class NewsCardEditor extends HTMLElement {
       display.push({ name: "auto_scroll", selector: { boolean: {} } });
       if (config.auto_scroll) display.push(speed);
     }
+    const content = ["show_image", "show_date", "show_time", "show_source", "show_author", ...(ticker ? [] : ["show_summary"])];
     const advanced = [{ name: "entities", selector: { entity: { multiple: true, filter: [{ integration: DOMAIN }, { integration: "feedreader", domain: "event" }] } } }];
     return [
       { name: "feeds", selector: { device: { multiple: true, filter: [{ integration: DOMAIN }, { integration: "feedreader" }] } } },
@@ -1206,7 +1229,9 @@ class NewsCardEditor extends HTMLElement {
       {
         type: "expandable", name: "content", flatten: true, icon: "mdi:text-box-outline",
         schema: [
-          { type: "grid", name: "", flatten: true, schema: ["show_image", "show_date", "show_time", "show_source", "show_author"].map((name) => ({ name, selector: { boolean: {} } })) },
+          { type: "grid", name: "", flatten: true, schema: content.map((name) => ({ name, selector: { boolean: {} } })) },
+          // בבר התחתון יש שורה אחת, אז התקציר רק ברשימה
+          ...(!ticker && config.show_summary ? [{ name: "summary_lines", selector: { number: { min: 1, max: 10, step: 1, mode: "slider" } } }] : []),
           { name: "date_format", selector: { select: { mode: "dropdown", options: opt("date", ENUMS.date_format) } } },
         ],
       },

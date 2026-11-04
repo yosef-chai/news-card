@@ -25,7 +25,7 @@ News feeds for Home Assistant, installed together as one package:
 - **Clean articles.** HTML, character entities and double-escaped HTML are cleaned up. Non-UTF-8 feeds (for example windows-1255 Hebrew) are decoded correctly. Boilerplate like "The post … appeared first on …" is removed, and authors are names without emails.
 - **Images.** Each article gets the best image it has: `media:content`, `media:thumbnail`, `itunes:image`, an enclosure, or the first real `<img>`. A podcast episode falls back to the show's artwork. If an article has no image at all, its page's share image (`og:image`) is looked up.
 - **Image proxy.** Images can load through Home Assistant, which fixes sites that block hotlinking and `http` images on an `https` dashboard.
-- **The card.** List or ticker, with image, date, time, source and author toggles. Sorting, a limit, absolute or relative time, a summary dialog, dimmed read articles, a visual editor, sections-view sizing, English and Hebrew, right-to-left support.
+- **The card.** List or ticker, with image, date, time, source, author and summary toggles. Sorting, a limit, absolute or relative time, a summary dialog, dimmed read articles, a visual editor, sections-view sizing, English and Hebrew, right-to-left support.
 - **Alerts without automations.** Send new articles to phones and speakers, or a roundup at a set time, right from the feed page.
 - **Automations.** New article and No new articles triggers, a Recent article condition, five actions, three blueprints, an event entity and a bus event.
 - **Reliable.** Downloads only when the feed changed. Keeps showing the last good copy while a site is down. Slows down after failures and follows `Retry-After`. Opens a repair issue when a feed needs your help.
@@ -128,6 +128,8 @@ Add **News Card** from the dashboard editor and pick one or more **news sources*
 | `show_time` | boolean | `true` | Publication time. |
 | `show_source` | boolean | `true` | Source name. |
 | `show_author` | boolean | `false` | Author name. |
+| `show_summary` | boolean | `false` | List only. The article's summary under its title. |
+| `summary_lines` | number | `2` | 1–10. A longer summary is cut off; select the article to read all of it. |
 | `date_format` | `absolute` \| `relative` | `absolute` | `relative` shows "5 minutes ago" while `show_date` or `show_time` is on. |
 | `sort` | `desc` \| `asc` \| `random` | `desc` | Newest first, oldest first, or random. |
 | `max_items` | number | `30` | 1–100, across all sources. |
@@ -157,6 +159,8 @@ show_date: true
 show_time: true
 show_source: true
 show_author: false
+show_summary: false
+summary_lines: 2
 date_format: absolute
 sort: desc
 max_items: 30
