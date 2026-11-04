@@ -4,7 +4,7 @@
  * ותומך גם בישויות event של Feedreader (הכתבה האחרונה בלבד).
  */
 
-const CARD_VERSION = "1.8.0";
+const CARD_VERSION = "1.9.0";
 const DOMAIN = "news_card";
 const READ_KEY = "news-card:read";
 const READ_LIMIT = 500;
