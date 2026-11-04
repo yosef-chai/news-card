@@ -49,7 +49,7 @@
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.][my-marketplace-badge]][my-marketplace]
 
-1. לוחצים על הכפתור. או נכנסים ל**הגדרות ← Marketplace**, בוחרים **Add from link** ומזינים `yosef-chai/news-card`. אם ה-Marketplace מבקש לחבר את GitHub, עוברים על השלבים שהוא מציג.
+1. לוחצים על הכפתור. או נכנסים ל**הגדרות ← Marketplace** ומחפשים **News Card**.
 2. לוחצים **Install**, בודקים את הגרסה ולוחצים שוב **Install**.
 3. בסוף ההתקנה נפתח דף ההגדרה. מרעננים את הדפדפן כדי שהכרטיס ייטען.
 
@@ -62,8 +62,8 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs]
 
-1. לוחצים על הכפתור. או ב-HACS פותחים **⋮ ← Custom repositories** ומוסיפים את `https://github.com/yosef-chai/news-card` בקטגוריה **Integration**.
-2. מחפשים **News Card** ולוחצים **Download**.
+1. לוחצים על הכפתור. או פותחים את HACS ומחפשים **News Card**.
+2. לוחצים **Download**.
 3. מפעילים מחדש את Home Assistant.
 
 בעדכון ל-Home Assistant 2026.11, ‏News Card עובר מ-HACS ל-Marketplace לבד.
@@ -437,7 +437,7 @@ mypy
 </div>
 
 <!-- Links -->
-[marketplace-badge]: https://img.shields.io/badge/Marketplace-Custom-41BDF5.svg?logo=homeassistant
+[marketplace-badge]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?logo=homeassistant
 [release]: https://github.com/yosef-chai/news-card/releases/latest
 [release-badge]: https://img.shields.io/github/v/release/yosef-chai/news-card
 [ha]: https://www.home-assistant.io

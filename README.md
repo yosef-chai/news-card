@@ -48,7 +48,7 @@ Requires Home Assistant 2026.9 or newer.
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.][my-marketplace-badge]][my-marketplace]
 
-1. Select the button above. Or go to **Settings → Marketplace**, select **Add from link** and enter `yosef-chai/news-card`. If the Marketplace asks you to connect GitHub, follow its steps.
+1. Select the button above. Or go to **Settings → Marketplace** and search for **News Card**.
 2. Select **Install**, check the version, and select **Install** again.
 3. The setup page opens when the install is done. Refresh the browser so the card loads.
 
@@ -61,8 +61,8 @@ Updates show up under **Settings → Updates**. After an update, a repair offers
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs]
 
-1. Select the button above. Or in HACS, open **⋮ → Custom repositories** and add `https://github.com/yosef-chai/news-card` as **Integration**.
-2. Search for **News Card** and select **Download**.
+1. Select the button above. Or open HACS and search for **News Card**.
+2. Select **Download**.
 3. Restart Home Assistant.
 
 When you update to Home Assistant 2026.11, HACS moves News Card to the Marketplace for you.
@@ -395,7 +395,7 @@ mypy
 [MIT][license] © Yosef Chai
 
 <!-- Links -->
-[marketplace-badge]: https://img.shields.io/badge/Marketplace-Custom-41BDF5.svg?logo=homeassistant
+[marketplace-badge]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?logo=homeassistant
 [release]: https://github.com/yosef-chai/news-card/releases/latest
 [release-badge]: https://img.shields.io/github/v/release/yosef-chai/news-card
 [ha]: https://www.home-assistant.io
